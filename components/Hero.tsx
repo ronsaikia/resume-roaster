@@ -4,79 +4,58 @@ import { motion } from "framer-motion";
 
 export default function Hero() {
   return (
-    <div className="text-center space-y-6">
-      {/* Main Heading */}
+    <div className="space-y-8">
+      {/* Main Heading - Bold Editorial Layout */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.6 }}
-        className="space-y-4 px-2 sm:px-0"
+        className="space-y-2 text-left md:text-left"
       >
-        <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl xl:text-7xl font-bold tracking-tight leading-tight">
-          <span className="text-gradient">Get Your Resume{" "}</span>
-          <motion.span
-            className="inline-flex items-center gap-2 text-gradient-fire"
-            animate={{
-              scale: [1, 1.05, 1],
-              opacity: [1, 0.9, 1],
-            }}
-            transition={{
-              duration: 2,
-              repeat: Infinity,
-              ease: "easeInOut",
-            }}
-          >
-            Roasted
-            <motion.span
-              className="hidden sm:inline-block"
-              animate={{
-                rotate: [0, 10, -10, 0],
-                scale: [1, 1.2, 1],
-              }}
-              transition={{
-                duration: 0.5,
-                repeat: Infinity,
-                repeatDelay: 2,
-              }}
-            >
-              🔥
-            </motion.span>
-          </motion.span>
+        <h1 className="text-editorial font-bold text-white" style={{ fontSize: 'clamp(48px, 8vw, 96px)' }}>
+          Get Your Resume
         </h1>
-
-        <motion.p
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.3, duration: 0.6 }}
-          className="text-lg sm:text-xl text-accent-slate max-w-2xl mx-auto"
-        >
-          AI-powered brutal honesty. Structured feedback. Real scores.
-        </motion.p>
+        <h1 className="text-editorial font-bold text-gradient-fire underline-accent" style={{ fontSize: 'clamp(48px, 8vw, 96px)' }}>
+          Roasted 🔥
+        </h1>
       </motion.div>
 
-      {/* Feature Pills */}
+      {/* Subheading Badge */}
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.3, duration: 0.6 }}
+      >
+        <span className="badge-pill border-electric-500 text-electric-500">
+          AI-POWERED • BRUTAL • HONEST
+        </span>
+      </motion.div>
+
+      {/* Three Stats */}
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.5, duration: 0.6 }}
-        className="flex flex-wrap justify-center gap-3"
+        className="flex items-center gap-6 md:gap-12 pt-4"
       >
-        {[
-          { icon: "🤖", text: "AI Analysis" },
-          { icon: "📊", text: "Detailed Scoring" },
-          { icon: "💡", text: "Actionable Tips" },
-        ].map((feature, index) => (
-          <motion.div
-            key={feature.text}
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            transition={{ delay: 0.6 + index * 0.1 }}
-            className="flex items-center gap-2 px-4 py-2 rounded-full glass text-sm"
-          >
-            <span>{feature.icon}</span>
-            <span className="text-accent-slate">{feature.text}</span>
-          </motion.div>
-        ))}
+        <div className="text-left">
+          <div className="text-4xl md:text-5xl font-bold text-white font-mono">7</div>
+          <div className="text-sm text-accent-slate mt-1">Categories</div>
+        </div>
+
+        <div className="w-px h-12 bg-navy-700" />
+
+        <div className="text-left">
+          <div className="text-4xl md:text-5xl font-bold text-white font-mono">100</div>
+          <div className="text-sm text-accent-slate mt-1">Points</div>
+        </div>
+
+        <div className="w-px h-12 bg-navy-700" />
+
+        <div className="text-left">
+          <div className="text-4xl md:text-5xl font-bold text-white font-mono">0</div>
+          <div className="text-sm text-accent-slate mt-1">Mercy</div>
+        </div>
       </motion.div>
     </div>
   );

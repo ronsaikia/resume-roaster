@@ -34,6 +34,9 @@ export const metadata: Metadata = {
     description: "AI-powered brutal honesty. Structured feedback. Real scores.",
     type: "website",
   },
+  alternates: {
+    canonical: "/",
+  },
 };
 
 export default function RootLayout({

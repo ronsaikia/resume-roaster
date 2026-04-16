@@ -15,19 +15,20 @@
   box-sizing: border-box;
 }
 
+html, body {
+  overflow-x: hidden;
+  height: auto !important;
+  min-height: 100vh;
+}
+
 html {
   scroll-behavior: smooth;
-  overflow-x: hidden;
-  height: auto;
 }
 
 body {
   color: var(--foreground);
   background: var(--background);
   font-family: var(--font-inter), system-ui, sans-serif;
-  min-height: 100vh;
-  overflow-x: hidden;
-  height: auto;
 }
 
 @layer utilities {
@@ -265,4 +266,70 @@ body {
   75% {
     transform: rotate(1deg);
   }
+}
+
+/* Marquee animation */
+@keyframes marquee {
+  0% {
+    transform: translateX(0);
+  }
+  100% {
+    transform: translateX(-50%);
+  }
+}
+
+.animate-marquee {
+  animation: marquee 20s linear infinite;
+}
+
+/* Gumroad-inspired chunky card borders */
+.card-chunky {
+  background: #0d1b2e;
+  border: 2px solid #1e3a5f;
+  border-radius: 12px;
+  padding: 24px;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+.card-chunky:hover {
+  border-color: #2563eb;
+  transform: translateY(-2px);
+}
+
+/* Bold editorial text style */
+.text-editorial {
+  font-family: var(--font-space-mono), monospace;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+/* Thick underline accent */
+.underline-accent {
+  text-decoration: underline;
+  text-decoration-color: #2563eb;
+  text-decoration-thickness: 3px;
+  text-underline-offset: 4px;
+}
+
+/* Pill badge */
+.badge-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: 1.5px solid;
+  font-size: 12px;
+  font-weight: 600;
+  font-family: var(--font-space-mono), monospace;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Thick left border variations */
+.border-left-green {
+  border-left: 4px solid #22c55e;
+}
+
+.border-left-red {
+  border-left: 4px solid #ef4444;
 }

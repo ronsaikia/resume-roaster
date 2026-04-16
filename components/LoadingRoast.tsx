@@ -4,14 +4,14 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const loadingMessages = [
-  "Reading your 'proficient in MS Office'...",
-  "Crying internally...",
-  "Consulting the ghost of rejected applications...",
-  "Calculating how many recruiters said 'pass'...",
-  "Analyzing buzzword density...",
-  "Searching for measurable achievements...",
-  "Debating if 'team player' counts as a skill...",
-  "Preparing the emotional damage...",
+  "Tera resume padh ke aansu aa gaye... 😭",
+  "Consulting 15 rejected LinkedIn applications for reference...",
+  "Checking if 'MS Office Expert' is a real skill...",
+  "TCS NextStep bhi shocked hai yaar...",
+  "Ammi Papa ka sapna tod raha hun slowly...",
+  "Calculating damage to your FAANG dreams...",
+  "Bhai kitne buzzwords daale hain yaar... 💀",
+  "Grammarly ne bhi surrender kar diya...",
 ];
 
 export default function LoadingRoast() {

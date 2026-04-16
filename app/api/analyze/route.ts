@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { PDFParse } from "pdf-parse";
+import pdfParse from "pdf-parse";
 import Anthropic from "@anthropic-ai/sdk";
 import { SYSTEM_PROMPT, ANALYSIS_PROMPT } from "@/lib/analyzePrompt";
 
@@ -92,9 +92,8 @@ export async function POST(request: NextRequest) {
     // Parse PDF text
     let pdfText: string;
     try {
-      const pdf = new PDFParse({ data: new Uint8Array(buffer) });
-      const textResult = await pdf.getText();
-      pdfText = textResult.text;
+      const data = await pdfParse(buffer);
+      pdfText = data.text;
     } catch (parseError) {
       console.error("PDF parsing error:", parseError);
       return NextResponse.json(

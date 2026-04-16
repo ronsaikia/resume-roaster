@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { Sparkles, Zap, TrendingUp, Flame, RotateCcw } from "lucide-react";
+import { Sparkles, Flame, RotateCcw } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import Hero from "@/components/Hero";
 import UploadZone from "@/components/UploadZone";
@@ -170,39 +170,6 @@ const demoAnalysis: ResumeAnalysis = {
   ],
 };
 
-// Function to check if text looks like a resume
-function looksLikeResume(text: string): boolean {
-  const resumeKeywords = [
-    "experience",
-    "education",
-    "skills",
-    "work",
-    "job",
-    "employment",
-    "qualification",
-    "degree",
-    "university",
-    "college",
-    "project",
-    "achievement",
-    "summary",
-    "objective",
-    "contact",
-    "email",
-    "phone",
-    "linkedin",
-    "github",
-  ];
-
-  const textLower = text.toLowerCase();
-  const keywordCount = resumeKeywords.filter((kw) =>
-    textLower.includes(kw)
-  ).length;
-
-  // If less than 3 resume keywords found, likely not a resume
-  return keywordCount >= 3 && text.length > 200;
-}
-
 export default function Home() {
   const router = useRouter();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -250,7 +217,7 @@ export default function Home() {
       const data = await response.json();
 
       // Check for invalid document error
-      if (data.status === "invalid_document" || !looksLikeResume(data.extractedText || "")) {
+      if (data.status === "invalid_document") {
         const randomMessage =
           invalidDocumentMessages[
             Math.floor(Math.random() * invalidDocumentMessages.length)
@@ -422,51 +389,28 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Feature Cards */}
-          <div className="mt-20 grid sm:grid-cols-3 gap-6">
-            {[
-              {
-                icon: <Zap className="w-6 h-6" />,
-                title: "Analyze",
-                description:
-                  "AI-powered deep analysis of your resume's strengths and weaknesses",
-                color: "text-yellow-500",
-              },
-              {
-                icon: <TrendingUp className="w-6 h-6" />,
-                title: "Score",
-                description:
-                  "Get detailed scores across 7 critical resume dimensions",
-                color: "text-green-500",
-              },
-              {
-                icon: <Sparkles className="w-6 h-6" />,
-                title: "Improve",
-                description:
-                  "Receive actionable, prioritized feedback to land more interviews",
-                color: "text-electric-500",
-              },
-            ].map((feature, index) => (
+          {/* Marquee Strip */}
+          <div className="mt-20 overflow-hidden relative">
+            {/* Electric blue glow behind */}
+            <div className="absolute inset-0 bg-electric-500/10 blur-3xl" />
+
+            <div className="relative flex overflow-hidden">
               <motion.div
-                key={feature.title}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.5 + index * 0.1 }}
-                whileHover={{ y: -5 }}
-                className="card-glass text-center group"
+                className="flex whitespace-nowrap animate-marquee"
+                style={{ fontFamily: 'var(--font-space-mono), monospace' }}
               >
-                <div
-                  className={`inline-flex items-center justify-center w-12 h-12 rounded-xl
-                              bg-navy-800 mb-4 group-hover:bg-navy-700 transition-colors ${feature.color}`}
-                >
-                  {feature.icon}
-                </div>
-                <h3 className="text-lg font-semibold text-white mb-2">
-                  {feature.title}
-                </h3>
-                <p className="text-sm text-accent-slate">{feature.description}</p>
+                {Array(2).fill(null).map((_, setIndex) => (
+                  <div key={setIndex} className="flex items-center">
+                    {["ANALYZE", "SCORE", "IMPROVE", "ROAST", "ANALYZE", "SCORE", "IMPROVE", "ROAST"].map((text, i) => (
+                      <span key={i} className="text-electric-500 text-xl md:text-2xl font-mono mx-6">
+                        {text}
+                        <span className="text-accent-slate mx-6">•</span>
+                      </span>
+                    ))}
+                  </div>
+                ))}
               </motion.div>
-            ))}
+            </div>
           </div>
 
           {/* Footer Note */}
