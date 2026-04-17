@@ -1,9 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
-import { GoogleGenerativeAI, Part } from "@google/generative-ai";
+import OpenAI from "openai";
 import { SYSTEM_PROMPT, ANALYSIS_PROMPT, VISION_ANALYSIS_PROMPT, SIMPLIFIED_JSON_PROMPT } from "@/lib/analyzePrompt";
 
-// Supports: GEMINI_API_KEY, GEMINI_API_KEY_2, GEMINI_API_KEY_3
-// Add multiple keys to .env.local for automatic rotation on 503 errors
+// OpenRouter client - single instance
+const openrouter = new OpenAI({
+  baseURL: "https://openrouter.ai/api/v1",
+  apiKey: process.env.OPENROUTER_API_KEY || "",
+  defaultHeaders: {
+    "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
+    "X-Title": "JhalmuriCV",
+  },
+});
+
+const MODEL = "google/gemini-2.5-flash";
 
 // PDF parsing requires Node.js runtime
 export const runtime = "nodejs";
@@ -95,45 +104,74 @@ function isOverloadedError(error: unknown): boolean {
   return false;
 }
 
-// Retry wrapper for Gemini API call with key rotation
-async function callGeminiWithRetry(
-  apiKeys: string[],
+async function callOpenRouterWithRetry(
   prompt: string,
   base64Data?: string,
-  maxRetries = 4
-) {
-  let keyIndex = 0;
-  const delays = [1000, 2000, 3000, 4000];
+  maxRetries = 3
+): Promise<string> {
+  const delays = [1000, 2000, 4000];
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    const currentKey = apiKeys[keyIndex % apiKeys.length];
-    const genAI = new GoogleGenerativeAI(currentKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-
     try {
+      let messages: OpenAI.Chat.ChatCompletionMessageParam[];
+
       if (base64Data) {
-        const contentParts: Part[] = [
-          { inlineData: { mimeType: "application/pdf", data: base64Data } },
-          { text: prompt },
+        // Vision mode: send PDF as base64 data URL
+        messages = [
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: prompt,
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:application/pdf;base64,${base64Data}`,
+                },
+              },
+            ] as OpenAI.Chat.ChatCompletionContentPart[],
+          },
         ];
-        return await model.generateContent({ contents: [{ role: "user", parts: contentParts }] });
       } else {
-        return await model.generateContent(prompt);
+        // Text mode
+        messages = [
+          {
+            role: "user",
+            content: prompt,
+          },
+        ];
       }
+
+      const completion = await openrouter.chat.completions.create({
+        model: MODEL,
+        messages,
+        max_tokens: 4096,
+        temperature: 0.7,
+      });
+
+      const responseText = completion.choices[0]?.message?.content || "";
+      if (!responseText) {
+        throw new Error("Empty response from OpenRouter");
+      }
+
+      return responseText;
     } catch (error) {
-      console.error(`[Gemini] Key ${keyIndex % apiKeys.length + 1}, attempt ${attempt + 1} failed:`, error);
+      console.error(`[OpenRouter] Attempt ${attempt + 1} failed:`, error);
 
       if (attempt < maxRetries && isOverloadedError(error)) {
-        keyIndex++; // rotate to next key
         const delay = delays[attempt] || 4000;
-        console.log(`[Gemini] Rotating to key ${keyIndex % apiKeys.length + 1}, retrying after ${delay}ms...`);
+        console.log(`[OpenRouter] Retrying after ${delay}ms...`);
         await sleep(delay);
         continue;
       }
+
       throw error;
     }
   }
-  throw new Error("All API keys exhausted after retries");
+
+  throw new Error("Max retries exceeded");
 }
 
 // Function to check if text looks like a resume
@@ -211,16 +249,10 @@ const invalidDocumentMessages = [
 export async function POST(request: NextRequest) {
   // Wrap entire handler in try/catch for robustness
   try {
-    // Collect all available API keys
-    const apiKeys = [
-      process.env.GEMINI_API_KEY,
-      process.env.GEMINI_API_KEY_2,
-      process.env.GEMINI_API_KEY_3,
-    ].filter(Boolean) as string[];
-
-    if (apiKeys.length === 0) {
+    if (!process.env.OPENROUTER_API_KEY) {
+      console.error("OPENROUTER_API_KEY is not set!");
       return NextResponse.json(
-        { error: "Server configuration error: No API keys configured" },
+        { error: "Server configuration error: API key not configured" },
         { status: 500 }
       );
     }
@@ -284,14 +316,13 @@ export async function POST(request: NextRequest) {
       useVisionMode = true;
     }
 
-    let result;
-    let visionAttemptCount = 0;
+    let result: string | undefined;
     let base64Data: string | undefined;
 
     // Prepare base64 data for vision mode if needed
     if (useVisionMode) {
       if (buffer.length > 4 * 1024 * 1024) {
-        console.log("[Gemini] PDF too large, trimming to 4MB for vision mode");
+        console.log("[OpenRouter] PDF too large, trimming to 4MB for vision mode");
         const trimmedBuffer = Buffer.from(buffer.subarray(0, 4 * 1024 * 1024));
         base64Data = trimmedBuffer.toString("base64");
       } else {
@@ -299,22 +330,21 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Wrap Gemini calls in a retry loop for 503 errors
-    const maxGeminiAttempts = 3;
+    // Wrap OpenRouter calls in a retry loop for 503 errors
+    const maxOpenRouterAttempts = 3;
     const delays = [1000, 2000, 4000];
 
-    for (let attempt = 0; attempt < maxGeminiAttempts; attempt++) {
+    for (let attempt = 0; attempt < maxOpenRouterAttempts; attempt++) {
       try {
         if (useVisionMode) {
-          // Vision mode: send raw PDF to Gemini
-          console.log("[Gemini] Using vision mode with raw PDF, buffer size:", buffer.length);
+          // Vision mode: send raw PDF to OpenRouter
+          console.log("[OpenRouter] Using vision mode with raw PDF, buffer size:", buffer.length);
 
-          result = await callGeminiWithRetry(
-            apiKeys,
+          const visionResponse = await callOpenRouterWithRetry(
             SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT,
             base64Data
           );
-          visionAttemptCount = attempt + 1;
+          result = visionResponse;
         } else {
           // Text mode: validate it's a resume first
           if (!looksLikeResume(pdfText)) {
@@ -333,23 +363,23 @@ export async function POST(request: NextRequest) {
           // Truncate very long resumes to avoid token limits
           const truncatedText = pdfText.slice(0, 15000);
 
-          // Call Gemini API with text prompt
-          console.log("[Gemini] Using text mode with extracted PDF text");
-          result = await callGeminiWithRetry(
-            apiKeys,
+          // Call OpenRouter API with text prompt
+          console.log("[OpenRouter] Using text mode with extracted PDF text");
+          const textResponse = await callOpenRouterWithRetry(
             SYSTEM_PROMPT + "\n\n" + ANALYSIS_PROMPT(truncatedText)
           );
+          result = textResponse;
         }
 
         // If we get here, the call succeeded - break out of retry loop
         break;
       } catch (error) {
-        console.error(`[Gemini] Handler attempt ${attempt + 1} failed:`, error);
+        console.error(`[OpenRouter] Handler attempt ${attempt + 1} failed:`, error);
 
         // Only retry on 503/overload errors
-        if (attempt < maxGeminiAttempts - 1 && isOverloadedError(error)) {
+        if (attempt < maxOpenRouterAttempts - 1 && isOverloadedError(error)) {
           const delay = delays[attempt] || 4000;
-          console.log(`[Gemini] Handler retrying after ${delay}ms...`);
+          console.log(`[OpenRouter] Handler retrying after ${delay}ms...`);
           await sleep(delay);
           continue;
         }
@@ -360,12 +390,12 @@ export async function POST(request: NextRequest) {
     }
 
     if (!result) {
-      throw new Error("Failed to get Gemini response after all retries");
+      throw new Error("Failed to get OpenRouter response after all retries");
     }
 
     // Process the response
     try {
-      const analysisText = result.response.text().trim();
+      const analysisText = (result as string).trim();
 
       let cleanedText = analysisText;
 
@@ -389,16 +419,13 @@ export async function POST(request: NextRequest) {
         console.error("Response text:", cleanedText.substring(0, 500));
 
         // In vision mode, try one more time with a simplified prompt
-        if (useVisionMode && visionAttemptCount > 0 && base64Data) {
-          console.log("[Gemini] Vision mode JSON parse failed, attempting simplified retry...");
+        if (useVisionMode && base64Data) {
+          console.log("[OpenRouter] Vision mode JSON parse failed, attempting simplified retry...");
           try {
-            const retryResult = await callGeminiWithRetry(
-              apiKeys,
+            const retryText = await callOpenRouterWithRetry(
               SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT + "\n\n" + SIMPLIFIED_JSON_PROMPT,
               base64Data
             );
-
-            const retryText = retryResult.response.text().trim();
             let retryCleaned = retryText;
             if (retryCleaned.startsWith("```json")) retryCleaned = retryCleaned.slice(7);
             else if (retryCleaned.startsWith("```")) retryCleaned = retryCleaned.slice(3);
@@ -406,7 +433,7 @@ export async function POST(request: NextRequest) {
             retryCleaned = retryCleaned.trim();
 
             analysis = JSON.parse(retryCleaned);
-            console.log("[Gemini] Simplified retry succeeded");
+            console.log("[OpenRouter] Simplified retry succeeded");
           } catch (retryError) {
             console.error("Simplified retry also failed:", retryError);
             throw new Error("Failed to parse analysis response after retry");
@@ -431,7 +458,7 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Check for invalid_document status from Gemini (in vision mode)
+      // Check for invalid_document status from model (in vision mode)
       if (analysis.status === "invalid_document") {
         return NextResponse.json(
           {
@@ -461,7 +488,7 @@ export async function POST(request: NextRequest) {
       // These are valid for bad resumes
       return NextResponse.json(analysis);
     } catch (apiError) {
-      console.error("Error processing Gemini response:", apiError);
+      console.error("Error processing OpenRouter response:", apiError);
       return NextResponse.json(
         { error: "Analysis failed. Please try again later." },
         { status: 500 }
