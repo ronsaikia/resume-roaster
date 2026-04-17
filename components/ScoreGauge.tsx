@@ -19,6 +19,7 @@ export default function ScoreGauge({
   label = "Overall Score",
 }: ScoreGaugeProps) {
   const [displayScore, setDisplayScore] = useState(0);
+  const [showStamp, setShowStamp] = useState(false);
 
   const radius = (size - strokeWidth) / 2;
   const circumference = radius * 2 * Math.PI;
@@ -45,6 +46,8 @@ export default function ScoreGauge({
       if (current >= score) {
         setDisplayScore(score);
         clearInterval(timer);
+        // Trigger stamp effect after score animation completes
+        setShowStamp(true);
       } else {
         setDisplayScore(Math.floor(current));
       }
@@ -59,13 +62,20 @@ export default function ScoreGauge({
 
   return (
     <div className="relative flex flex-col items-center">
-      {/* Container - neo-brutalist style */}
-      <div
+      {/* Container - neo-brutalist style with stamp animation */}
+      <motion.div
         className="bg-white border-4 border-[#1a1a1a] p-6 relative"
         style={{
           width: size + 48,
           height: size + 48,
           boxShadow: '6px 6px 0px #1a1a1a'
+        }}
+        animate={showStamp ? {
+          scale: [1, 1.05, 1],
+        } : {}}
+        transition={{
+          duration: 0.3,
+          ease: "easeOut",
         }}
       >
         {/* SVG Gauge */}
@@ -116,7 +126,7 @@ export default function ScoreGauge({
           </motion.span>
           <span className="text-sm text-[#6b6b6b] mt-1 font-bold">/100</span>
         </div>
-      </div>
+      </motion.div>
 
       {/* Label */}
       {showLabel && (

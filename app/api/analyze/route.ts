@@ -2,6 +2,47 @@ import { NextRequest, NextResponse } from "next/server";
 import OpenAI from "openai";
 import { SYSTEM_PROMPT, ANALYSIS_PROMPT, VISION_ANALYSIS_PROMPT, SIMPLIFIED_JSON_PROMPT } from "@/lib/analyzePrompt";
 
+// Type definitions for PDF.js
+interface PdfjsLib {
+  GlobalWorkerOptions: {
+    workerSrc: string | false;
+  };
+  getDocument: (options: { data: Uint8Array }) => {
+    promise: Promise<PDFDocument>;
+  };
+}
+
+interface PDFDocument {
+  numPages: number;
+  getPage: (pageNum: number) => Promise<PDFPage>;
+}
+
+interface PDFPage {
+  getViewport: (options: { scale: number }) => { width: number; height: number };
+  getTextContent: () => Promise<TextContent>;
+  render: (options: {
+    canvasContext: unknown;
+    viewport: { width: number; height: number };
+    canvas: unknown;
+  }) => { promise: Promise<void> };
+}
+
+interface TextContent {
+  items: TextItem[];
+}
+
+interface TextItem {
+  str?: string;
+}
+
+// Environment variable checks at startup
+if (!process.env.OPENROUTER_API_KEY) {
+  console.error("[Startup] OPENROUTER_API_KEY is not set!");
+}
+if (!process.env.NEXT_PUBLIC_SITE_URL) {
+  console.warn("[Startup] NEXT_PUBLIC_SITE_URL is not set, using default");
+}
+
 // OpenRouter client - single instance
 const openrouter = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
@@ -21,8 +62,93 @@ export const dynamic = "force-dynamic";
 // Sleep helper for retry logic
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Parse PDF using pure regex approach - no native dependencies
-async function parsePDF(buffer: Buffer): Promise<{ text: string }> {
+// Parse PDF using pdfjs-dist - more reliable than regex
+async function parsePDFWithPdfjs(buffer: Buffer): Promise<{ text: string }> {
+  try {
+    // Use legacy build for server-side rendering
+    const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs") as unknown as PdfjsLib;
+    // Disable worker for server-side rendering
+    pdfjsLib.GlobalWorkerOptions.workerSrc = false;
+
+    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+    const pdf = await loadingTask.promise;
+
+    let fullText = "";
+    // Process up to 5 pages to avoid timeout issues
+    const pagesToProcess = Math.min(pdf.numPages, 5);
+
+    for (let i = 1; i <= pagesToProcess; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items
+        .map((item) => ("str" in item ? item.str : ""))
+        .join(" ");
+      fullText += pageText + "\n";
+    }
+
+    const trimmedText = fullText.trim();
+    console.log(`[PDF Parse] pdfjs extraction succeeded, got ${trimmedText.length} chars from ${pagesToProcess} pages`);
+
+    return { text: trimmedText };
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("[PDF Parse] pdfjs strategy failed:", msg);
+    throw new Error("Could not extract text from PDF using pdfjs");
+  }
+}
+
+// Convert PDF pages to JPEG images for vision mode
+async function convertPDFToImages(buffer: Buffer): Promise<string[]> {
+  try {
+    const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs") as unknown as PdfjsLib;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = false;
+
+    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
+    const pdf = await loadingTask.promise;
+
+    const images: string[] = [];
+    // Convert first 2 pages max to avoid huge payloads
+    const pagesToConvert = Math.min(pdf.numPages, 2);
+
+    for (let i = 1; i <= pagesToConvert; i++) {
+      const page = await pdf.getPage(i);
+
+      // Use 1.5x scale for good quality while keeping size reasonable
+      const scale = 1.5;
+      const viewport = page.getViewport({ scale });
+
+      // Create canvas using Node.js canvas API
+      // @napi-rs/canvas should be available as it's in dependencies
+      const { createCanvas } = await import("@napi-rs/canvas");
+      const canvas = createCanvas(viewport.width, viewport.height);
+      const context = canvas.getContext("2d");
+
+      // Render PDF page to canvas
+      // pdfjs needs both canvas and canvasContext for server-side rendering
+      await page.render({
+        canvasContext: context as unknown as CanvasRenderingContext2D,
+        viewport: viewport,
+        canvas: canvas as unknown as HTMLCanvasElement,
+      }).promise;
+
+      // Export as JPEG base64
+      const jpegBuffer = await canvas.encode("jpeg", 85);
+      const base64Image = jpegBuffer.toString("base64");
+      images.push(base64Image);
+
+      console.log(`[PDF Vision] Converted page ${i} to JPEG: ${base64Image.length} chars base64`);
+    }
+
+    return images;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("[PDF Vision] Failed to convert PDF to images:", msg);
+    throw error;
+  }
+}
+
+// Parse PDF using pure regex approach - fallback when pdfjs fails
+async function parsePDFWithRegex(buffer: Buffer): Promise<{ text: string }> {
   try {
     const pdfString = buffer.toString("latin1");
     const textParts: string[] = [];
@@ -87,6 +213,34 @@ async function parsePDF(buffer: Buffer): Promise<{ text: string }> {
   }
 }
 
+// Main PDF parser - tries pdfjs first, then regex, then falls back to vision
+async function parsePDF(buffer: Buffer): Promise<{ text: string; needsVision: boolean }> {
+  // Strategy 1: Try pdfjs-dist text extraction
+  try {
+    const result = await parsePDFWithPdfjs(buffer);
+    if (result.text.length >= 100) {
+      return { text: result.text, needsVision: false };
+    }
+    console.log("[PDF Parse] pdfjs returned insufficient text, trying regex...");
+  } catch {
+    console.log("[PDF Parse] pdfjs failed, falling back to regex...");
+  }
+
+  // Strategy 2: Try regex-based extraction
+  try {
+    const result = await parsePDFWithRegex(buffer);
+    if (result.text.length >= 100) {
+      return { text: result.text, needsVision: false };
+    }
+    console.log("[PDF Parse] regex returned insufficient text, will use vision mode");
+  } catch {
+    console.log("[PDF Parse] regex also failed, will use vision mode");
+  }
+
+  // Strategy 3: Fall back to vision mode
+  return { text: "", needsVision: true };
+}
+
 // Check if an error indicates a 503/overload/429 condition
 function isOverloadedError(error: unknown): boolean {
   if (error instanceof Error) {
@@ -98,7 +252,8 @@ function isOverloadedError(error: unknown): boolean {
       message.includes("rate limit") ||
       message.includes("too many requests") ||
       message.includes("resource exhausted") ||
-      message.includes("try again later")
+      message.includes("try again later") ||
+      message.includes("max retries")
     );
   }
   return false;
@@ -106,7 +261,7 @@ function isOverloadedError(error: unknown): boolean {
 
 async function callOpenRouterWithRetry(
   prompt: string,
-  base64Data?: string,
+  imageBase64List?: string[],
   maxRetries = 3
 ): Promise<string> {
   const delays = [1000, 2000, 4000];
@@ -115,23 +270,26 @@ async function callOpenRouterWithRetry(
     try {
       let messages: OpenAI.Chat.ChatCompletionMessageParam[];
 
-      if (base64Data) {
-        // Vision mode: send PDF as base64 data URL
+      if (imageBase64List && imageBase64List.length > 0) {
+        // Vision mode: send images as base64 data URLs
+        const contentParts: OpenAI.Chat.ChatCompletionContentPart[] = [
+          { type: "text", text: prompt },
+        ];
+
+        // Add each image
+        for (const imageBase64 of imageBase64List) {
+          contentParts.push({
+            type: "image_url",
+            image_url: {
+              url: `data:image/jpeg;base64,${imageBase64}`,
+            },
+          });
+        }
+
         messages = [
           {
             role: "user",
-            content: [
-              {
-                type: "text",
-                text: prompt,
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:application/pdf;base64,${base64Data}`,
-                },
-              },
-            ] as OpenAI.Chat.ChatCompletionContentPart[],
+            content: contentParts,
           },
         ];
       } else {
@@ -171,7 +329,7 @@ async function callOpenRouterWithRetry(
     }
   }
 
-  throw new Error("Max retries exceeded");
+  throw new Error("503 Service Unavailable: Max retries exceeded");
 }
 
 // Function to check if text looks like a resume
@@ -249,16 +407,22 @@ const invalidDocumentMessages = [
 export async function POST(request: NextRequest) {
   // Wrap entire handler in try/catch for robustness
   try {
+    // Startup check for environment variables
     if (!process.env.OPENROUTER_API_KEY) {
       console.error("OPENROUTER_API_KEY is not set!");
       return NextResponse.json(
-        { error: "Server configuration error: API key not configured" },
+        { error: "Bhai, server ka API key missing hai 😭 Admin se baat kar, ya Demo try karo!" },
         { status: 500 }
       );
     }
 
+    if (!process.env.NEXT_PUBLIC_SITE_URL) {
+      console.warn("NEXT_PUBLIC_SITE_URL is not set, using default");
+    }
+
     const formData = await request.formData();
     const file = formData.get("resume") as File | null;
+    const targetRole = formData.get("targetRole") as string | null;
 
     if (!file) {
       return NextResponse.json(
@@ -297,16 +461,17 @@ export async function POST(request: NextRequest) {
     }
     const buffer = Buffer.from(bytes);
 
-    // Try to parse PDF text
+    // Try to parse PDF text using new multi-strategy approach
     let pdfText = "";
     let useVisionMode = false;
 
     try {
-      const data = await parsePDF(buffer);
-      pdfText = data.text;
-    } catch {
-      // Text extraction failed - fall back to vision mode
-      console.log("[PDF Parse] Text extraction failed, falling back to vision mode");
+      const result = await parsePDF(buffer);
+      pdfText = result.text;
+      useVisionMode = result.needsVision;
+    } catch (error) {
+      console.error("[PDF Parse] All text extraction strategies failed:", error);
+      // Last resort: try vision mode
       useVisionMode = true;
     }
 
@@ -317,18 +482,28 @@ export async function POST(request: NextRequest) {
     }
 
     let result: string | undefined;
-    let base64Data: string | undefined;
+    let imageBase64List: string[] | undefined;
 
-    // Prepare base64 data for vision mode if needed
+    // Prepare images for vision mode if needed
     if (useVisionMode) {
-      if (buffer.length > 4 * 1024 * 1024) {
-        console.log("[OpenRouter] PDF too large, trimming to 4MB for vision mode");
-        const trimmedBuffer = Buffer.from(buffer.subarray(0, 4 * 1024 * 1024));
-        base64Data = trimmedBuffer.toString("base64");
-      } else {
-        base64Data = buffer.toString("base64");
+      try {
+        console.log("[PDF Vision] Converting PDF to images...");
+        imageBase64List = await convertPDFToImages(buffer);
+        console.log(`[PDF Vision] Converted ${imageBase64List.length} pages to JPEG`);
+      } catch (error) {
+        console.error("[PDF Vision] Failed to convert PDF to images:", error);
+        // If PDF conversion fails, we can't do vision mode - return error
+        return NextResponse.json(
+          { error: "Could not process PDF for visual analysis. Please try a different file." },
+          { status: 400 }
+        );
       }
     }
+
+    // Build the prompt with target role if provided
+    const rolePrefix = targetRole && targetRole !== "General / Fresher"
+      ? `TARGET ROLE: ${targetRole} - Evaluate the resume specifically for this role. Adjust ATS keywords, skills relevance scoring, and feedback accordingly.\n\n`
+      : "";
 
     // Wrap OpenRouter calls in a retry loop for 503 errors
     const maxOpenRouterAttempts = 3;
@@ -336,13 +511,14 @@ export async function POST(request: NextRequest) {
 
     for (let attempt = 0; attempt < maxOpenRouterAttempts; attempt++) {
       try {
-        if (useVisionMode) {
-          // Vision mode: send raw PDF to OpenRouter
-          console.log("[OpenRouter] Using vision mode with raw PDF, buffer size:", buffer.length);
+        if (useVisionMode && imageBase64List) {
+          // Vision mode: send converted JPEG images to OpenRouter
+          console.log("[OpenRouter] Using vision mode with converted JPEGs, pages:", imageBase64List.length);
 
+          const visionPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT;
           const visionResponse = await callOpenRouterWithRetry(
-            SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT,
-            base64Data
+            visionPrompt,
+            imageBase64List
           );
           result = visionResponse;
         } else {
@@ -365,9 +541,8 @@ export async function POST(request: NextRequest) {
 
           // Call OpenRouter API with text prompt
           console.log("[OpenRouter] Using text mode with extracted PDF text");
-          const textResponse = await callOpenRouterWithRetry(
-            SYSTEM_PROMPT + "\n\n" + ANALYSIS_PROMPT(truncatedText)
-          );
+          const textPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + ANALYSIS_PROMPT(truncatedText);
+          const textResponse = await callOpenRouterWithRetry(textPrompt);
           result = textResponse;
         }
 
@@ -419,12 +594,13 @@ export async function POST(request: NextRequest) {
         console.error("Response text:", cleanedText.substring(0, 500));
 
         // In vision mode, try one more time with a simplified prompt
-        if (useVisionMode && base64Data) {
+        if (useVisionMode && imageBase64List) {
           console.log("[OpenRouter] Vision mode JSON parse failed, attempting simplified retry...");
           try {
+            const retryPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT + "\n\n" + SIMPLIFIED_JSON_PROMPT;
             const retryText = await callOpenRouterWithRetry(
-              SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT + "\n\n" + SIMPLIFIED_JSON_PROMPT,
-              base64Data
+              retryPrompt,
+              imageBase64List
             );
             let retryCleaned = retryText;
             if (retryCleaned.startsWith("```json")) retryCleaned = retryCleaned.slice(7);
@@ -507,7 +683,8 @@ export async function POST(request: NextRequest) {
       errorMessage.includes("overloaded") ||
       errorMessage.includes("rate limit") ||
       errorMessage.includes("too many requests") ||
-      errorMessage.includes("resource exhausted")
+      errorMessage.includes("resource exhausted") ||
+      errorMessage.includes("max retries")
     ) {
       return NextResponse.json(
         {
@@ -518,9 +695,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Generic error - don't expose technical details
+    // Generic error - show friendly message in Hinglish
     return NextResponse.json(
-      { error: "Something went wrong while analyzing your resume. Please try again." },
+      { error: "Yaar kuchh toh gadbad ho gayi 😭 Thodi der baad dubara try karo!" },
       { status: 500 }
     );
   }

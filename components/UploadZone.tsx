@@ -9,12 +9,26 @@ interface UploadZoneProps {
   onFileSelect: (file: File) => void;
   selectedFile: File | null;
   onClearFile: () => void;
+  targetRole?: string;
+  onTargetRoleChange?: (role: string) => void;
 }
+
+const TARGET_ROLES = [
+  "General / Fresher",
+  "SDE / Software Engineer",
+  "Data Science / ML",
+  "Frontend Developer",
+  "Backend Developer",
+  "Full Stack Developer",
+  "DevOps / Cloud",
+];
 
 export default function UploadZone({
   onFileSelect,
   selectedFile,
   onClearFile,
+  targetRole = "General / Fresher",
+  onTargetRoleChange,
 }: UploadZoneProps) {
   const [isHovered, setIsHovered] = useState(false);
 
@@ -177,6 +191,33 @@ export default function UploadZone({
               </motion.div>
             )}
           </AnimatePresence>
+        </div>
+
+        {/* Target Role Dropdown */}
+        <div className="mt-6">
+          <label className="block text-sm font-bold text-[#1a1a1a] mb-2 font-mono">
+            Target Role (Optional)
+          </label>
+          <select
+            value={targetRole}
+            onChange={(e) => onTargetRoleChange?.(e.target.value)}
+            className="w-full px-4 py-3 bg-white text-[#1a1a1a] font-bold
+                     border-4 border-[#1a1a1a] focus:outline-none focus:ring-0
+                     cursor-pointer appearance-none"
+            style={{
+              boxShadow: '4px 4px 0px #1a1a1a',
+              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%231a1a1a' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")`,
+              backgroundRepeat: 'no-repeat',
+              backgroundPosition: 'right 12px center',
+              paddingRight: '48px',
+            }}
+          >
+            {TARGET_ROLES.map((role) => (
+              <option key={role} value={role}>
+                {role}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
 

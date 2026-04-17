@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
@@ -315,9 +316,57 @@ function InvalidDocModal({ isOpen, onClose, message }: InvalidDocModalProps) {
 export default function Home() {
   const router = useRouter();
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [targetRole, setTargetRole] = useState("General / Fresher");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [invalidDocError, setInvalidDocError] = useState<InvalidDocumentError | null>(null);
+  const [isRetrying, setIsRetrying] = useState(false);
+
+  // Check if error is retryable (API busy/overloaded)
+  const isRetryableError = (errMsg: string): boolean => {
+    const msg = errMsg.toLowerCase();
+    return (
+      msg.includes("503") ||
+      msg.includes("overloaded") ||
+      msg.includes("api busy") ||
+      msg.includes("rate limit") ||
+      msg.includes("try again")
+    );
+  };
+
+  // Previous roasts history from localStorage
+  const [previousRoasts, setPreviousRoasts] = useState<{ score: number; headline: string; date: string; role: string }[]>([]);
+
+  // Load previous roasts from localStorage on mount
+  useEffect(() => {
+    const stored = localStorage.getItem("previousRoasts");
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) {
+          setPreviousRoasts(parsed.slice(0, 3));
+        }
+      } catch (e) {
+        console.error("Failed to parse previous roasts:", e);
+      }
+    }
+  }, []);
+
+  // Save roast to history
+  const saveRoastToHistory = (analysis: ResumeAnalysis, role: string) => {
+    const newRoast = {
+      score: analysis.overallScore,
+      headline: analysis.roastHeadline,
+      date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      role: role,
+    };
+
+    setPreviousRoasts((prev) => {
+      const updated = [newRoast, ...prev].slice(0, 3);
+      localStorage.setItem("previousRoasts", JSON.stringify(updated));
+      return updated;
+    });
+  };
 
   const handleFileSelect = (file: File) => {
     setSelectedFile(file);
@@ -352,6 +401,7 @@ export default function Home() {
     try {
       const formData = new FormData();
       formData.append("resume", selectedFile);
+      formData.append("targetRole", targetRole);
 
       // Add AbortController with 90-second timeout (vision analysis takes longer)
       const controller = new AbortController();
@@ -397,6 +447,9 @@ export default function Home() {
         });
       }
 
+      // Save to history before navigating
+      saveRoastToHistory(data, targetRole);
+
       setIsLoading(false);
       router.push("/results");
     } catch (err) {
@@ -408,11 +461,11 @@ export default function Home() {
         const originalMsg = err.message;
 
         // If server already sent a Hindi/Hinglish message, use it directly
-        if (msg.includes("api busy hai") || msg.includes("demo mode try karo")) {
+        if (msg.includes("api busy") || msg.includes("tokens khatam") || msg.includes("demo mode") || msg.includes("gadbad") || msg.includes("api key missing")) {
           userMessage = originalMsg;
-        } else if (msg.includes("503") || msg.includes("429") || msg.includes("overloaded") || msg.includes("rate limit")) {
+        } else if (msg.includes("503") || msg.includes("429") || msg.includes("overloaded") || msg.includes("rate limit") || msg.includes("max retries")) {
           userMessage = "Yaar API ke tokens khatam ho gaye 😭 Demo try karo — warna thodi der baad dubara try karo!";
-        } else if (msg.includes("timeout") || msg.includes("abort") || msg.includes("signal")) {
+        } else if (msg.includes("timeout") || msg.includes("abort") || msg.includes("signal") || msg.includes("aborted")) {
           userMessage = "Bhai itna bada PDF? Server so gaya. Chota PDF upload kar ya Demo try kar";
         } else if (msg.includes("network") || msg.includes("fetch") || msg.includes("failed")) {
           userMessage = "Internet slow hai ya server gone for chai break ☕ Dubara try kar";
@@ -520,17 +573,59 @@ export default function Home() {
               onFileSelect={handleFileSelect}
               selectedFile={selectedFile}
               onClearFile={handleClearFile}
+              targetRole={targetRole}
+              onTargetRoleChange={setTargetRole}
             />
 
-            {/* Error Message */}
+            {/* Error Message with Retry Button */}
             {error && (
               <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mt-4 p-4 bg-[#ef4444] text-white font-bold border-3 border-[#1a1a1a]"
+                className="mt-4 p-4 bg-[#ef4444] text-white font-bold border-3 border-[#1a1a1a] flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
                 style={{ boxShadow: "4px 4px 0px #1a1a1a" }}
               >
-                {error}
+                <span>{error}</span>
+                {isRetryableError(error) && (
+                  <motion.button
+                    whileHover={{
+                      x: 1,
+                      y: 1,
+                      boxShadow: "1px 1px 0px #1a1a1a",
+                    }}
+                    whileTap={{
+                      x: 2,
+                      y: 2,
+                      boxShadow: "0px 0px 0px #1a1a1a",
+                    }}
+                    onClick={() => {
+                      setIsRetrying(true);
+                      handleAnalyze().finally(() => setIsRetrying(false));
+                    }}
+                    disabled={isRetrying}
+                    className="px-4 py-2 text-sm bg-white text-[#ef4444] font-bold
+                             border-3 border-[#1a1a1a] flex items-center gap-2
+                             disabled:opacity-50 disabled:cursor-not-allowed"
+                    style={{ boxShadow: "2px 2px 0px #1a1a1a" }}
+                  >
+                    {isRetrying ? (
+                      <>
+                        <motion.div
+                          animate={{ rotate: 360 }}
+                          transition={{
+                            duration: 1,
+                            repeat: Infinity,
+                            ease: "linear",
+                          }}
+                          className="w-4 h-4 border-2 border-[#ef4444] border-t-transparent rounded-full"
+                        />
+                        Retrying...
+                      </>
+                    ) : (
+                      <>Retry</>
+                    )}
+                  </motion.button>
+                )}
               </motion.div>
             )}
 
@@ -598,6 +693,60 @@ export default function Home() {
               </motion.button>
             </div>
           </div>
+
+          {/* Previous Roasts History */}
+          {previousRoasts.length > 0 && (
+            <motion.div
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.5 }}
+              className="mt-16"
+            >
+              <h3 className="text-lg font-bold text-[#1a1a1a] mb-4 font-mono text-center">
+                Previous Roasts
+              </h3>
+              <div className="flex flex-wrap justify-center gap-4">
+                {previousRoasts.map((roast, index) => {
+                  // Determine color based on score
+                  const getScoreColor = (s: number) => {
+                    if (s <= 40) return "#ef4444";
+                    if (s <= 70) return "#eab308";
+                    return "#22c55e";
+                  };
+                  const scoreColor = getScoreColor(roast.score);
+
+                  return (
+                    <motion.div
+                      key={index}
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      transition={{ delay: index * 0.1 }}
+                      className="bg-white border-4 border-[#1a1a1a] p-3 relative cursor-default"
+                      style={{ boxShadow: "4px 4px 0px #1a1a1a" }}
+                    >
+                      <div className="flex items-center gap-3">
+                        {/* Score Badge */}
+                        <div
+                          className="w-12 h-12 flex items-center justify-center text-white font-bold text-lg border-3 border-[#1a1a1a]"
+                          style={{ backgroundColor: scoreColor }}
+                        >
+                          {roast.score}
+                        </div>
+                        <div className="flex flex-col">
+                          <p className="text-xs text-[#6b6b6b] font-mono">
+                            {roast.role}
+                          </p>
+                          <p className="text-xs text-[#6b6b6b] font-mono mt-0.5">
+                            {roast.date}
+                          </p>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </motion.div>
+          )}
 
           {/* Marquee Strip - Fixed: removed redundant motion.div wrapper */}
           <div className="mt-20 overflow-hidden relative border-y-2 border-[#1a1a1a] py-4 bg-white group">
