@@ -293,7 +293,7 @@ export async function POST(request: NextRequest) {
     // Check for primary API key - throw 500 if missing
     if (!process.env.GEMINI_API_KEY_1) {
       return NextResponse.json(
-        { error: "Bhai, server ka Gemini API key missing hai 😭 Admin se baat kar!" },
+        { error: "Bhai, server ka API key missing hai 😭 Admin se baat kar!" },
         { status: 500 }
       );
     }
