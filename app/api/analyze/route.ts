@@ -407,7 +407,10 @@ export async function POST(request: NextRequest) {
         pdfBase64 = pdfBase64.substring(0, maxBase64Size);
       }
 
-      const visionPrompt = SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT(targetRole);
+      const rolePrefix = targetRole && targetRole !== "General / Fresher"
+        ? `TARGET ROLE: ${targetRole} - Evaluate the resume specifically for this role.\n\n`
+        : "";
+      const visionPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT;
 
       try {
         result = await callGeminiWithMultiKeyFallback(visionPrompt, true, pdfBase64, targetRole);
@@ -460,7 +463,10 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const textPrompt = SYSTEM_PROMPT + "\n\n" + ANALYSIS_PROMPT(pdfText, targetRole);
+      const rolePrefix = targetRole && targetRole !== "General / Fresher"
+        ? `TARGET ROLE: ${targetRole} - Evaluate the resume specifically for this role.\n\n`
+        : "";
+      const textPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + ANALYSIS_PROMPT(pdfText);
 
       try {
         result = await callGeminiWithMultiKeyFallback(textPrompt, false, undefined, targetRole);
@@ -506,7 +512,7 @@ export async function POST(request: NextRequest) {
               pdfBase64 = pdfBase64.substring(0, maxBase64Size);
             }
 
-            const retryPrompt = SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT(targetRole) + "\n\n" + SIMPLIFIED_JSON_PROMPT;
+            const retryPrompt = SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT + "\n\n" + SIMPLIFIED_JSON_PROMPT;
             const retryText = await callGeminiWithMultiKeyFallback(retryPrompt, true, pdfBase64, targetRole);
 
             let retryCleaned = retryText.trim();

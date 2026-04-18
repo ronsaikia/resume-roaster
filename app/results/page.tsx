@@ -214,13 +214,14 @@ export default function ResultsPage() {
                 animate={{ opacity: 1, y: 0 }}
                 className="mb-8"
               >
-                <span className="text-6xl md:text-8xl text-[#e8441a] font-serif">&ldquo;</span>
+                <span className="text-7xl md:text-9xl text-[#e8441a] font-serif leading-none">&ldquo;</span>
                 <h1
-                  className="text-3xl sm:text-4xl md:text-5xl font-bold text-gradient-fire inline"
-                  style={{ fontSize: 'clamp(2rem, 5vw, 4rem)' }}
+                  className="font-syne text-gradient-fire inline"
+                  style={{ fontSize: 'clamp(2.5rem, 6vw, 5rem)', fontWeight: 900 }}
                 >
                   {analysis.roastHeadline}
                 </h1>
+                <span className="text-7xl md:text-9xl text-[#e8441a] font-serif leading-none">&rdquo;</span>
               </motion.div>
 
               {/* Roast Quote Card - Neo-brutalist with hover */}
@@ -234,7 +235,7 @@ export default function ResultsPage() {
                   className="bg-white border-4 border-[#1a1a1a] p-6 sm:p-8
                     hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[8px_8px_0px_#1a1a1a]
                     transition-all duration-100 cursor-default"
-                  style={{ boxShadow: '6px 6px 0px #1a1a1a' }}
+                  style={{ boxShadow: '6px 6px 0px #1a1a1a', borderLeft: '4px solid #e8441a' }}
                 >
                   <p className="text-lg text-[#1a1a1a] italic font-medium">
                     &ldquo;{analysis.roastQuote}&rdquo;
