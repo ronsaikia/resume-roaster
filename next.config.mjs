@@ -1,10 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  webpack: (config, { isServer }) => {
-    if (isServer) {
-      config.externals = [...(config.externals || []), 'canvas', 'jsdom', '@napi-rs/canvas'];
-    }
-    return config;
+  experimental: {
+    serverComponentsExternalPackages: ['@napi-rs/canvas', 'pdfjs-dist'],
   },
 };
 

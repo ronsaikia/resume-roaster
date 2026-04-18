@@ -15,11 +15,12 @@ interface PdfjsLib {
 interface PDFDocument {
   numPages: number;
   getPage: (pageNum: number) => Promise<PDFPage>;
+  destroy?: () => void;
 }
 interface PDFPage {
   getViewport: (options: { scale: number }) => { width: number; height: number };
   getTextContent: () => Promise<TextContent>;
-  render: (options: { canvasContext: unknown; viewport: { width: number; height: number } }) => { promise: Promise<void> };
+  render: (options: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => { promise: Promise<void> };
 }
 interface TextContent { items: TextItem[] }
 interface TextItem { str?: string }
@@ -43,11 +44,66 @@ const TEXT_FALLBACKS = [
   "openai/gpt-oss-120b:free",
 ];
 const VISION_MODEL = "nvidia/nemotron-nano-12b-v2-vl:free";
+const MAX_VISION_PAGES = 2;
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function convertPdfToImages(buffer: Buffer): Promise<string[]> {
+  const base64Images: string[] = [];
+
+  try {
+    // Dynamically import pdfjs-dist legacy build for Node.js
+    const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs") as unknown as PdfjsLib;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = false;
+
+    // Dynamically import createCanvas from @napi-rs/canvas
+    const { createCanvas } = await import("@napi-rs/canvas");
+
+    const loadingTask = pdfjsLib.getDocument({
+      data: new Uint8Array(buffer),
+      useWorkerFetch: false,
+      isEvalSupported: false,
+      useSystemFonts: true,
+      disableWorker: true,
+    });
+
+    const pdf = await loadingTask.promise;
+    const pagesToProcess = Math.min(pdf.numPages, MAX_VISION_PAGES);
+
+    for (let pageNum = 1; pageNum <= pagesToProcess; pageNum++) {
+      const page = await pdf.getPage(pageNum);
+      const viewport = page.getViewport({ scale: 1.5 });
+
+      const canvas = createCanvas(viewport.width, viewport.height);
+      const context = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
+
+      await page.render({
+        canvasContext: context,
+        viewport: viewport,
+      }).promise;
+
+      // Export as JPEG base64
+      const jpegBuffer = await canvas.encode("jpeg");
+      const base64String = jpegBuffer.toString("base64");
+      base64Images.push(base64String);
+    }
+
+    // Clean up PDF document
+    if (pdf.destroy) {
+      pdf.destroy();
+    }
+
+    console.log(`[PDF to Image] Converted ${base64Images.length} pages to JPEG`);
+    return base64Images;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("[PDF to Image] Conversion failed:", msg);
+    throw new Error("PDF to image conversion failed: " + msg);
+  }
+}
 
 async function parsePDFWithPdfjs(buffer: Buffer): Promise<{ text: string }> {
   try {
@@ -166,44 +222,74 @@ function logErrorDetails(context: string, error: unknown): void {
   }
 }
 
-async function callOpenRouterWithRetry(
+async function callOpenRouterVisionMode(
   prompt: string,
-  model: string,
-  pdfBase64?: string,
+  base64Images: string[],
   maxRetries = 3
 ): Promise<string> {
   const delays = [1000, 2000, 4000];
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      let messages: OpenAI.Chat.ChatCompletionMessageParam[];
+      // Build content array with text and images
+      const content: OpenAI.Chat.ChatCompletionContentPart[] = [
+        { type: "text", text: prompt },
+      ];
 
-      if (pdfBase64) {
-        // Send PDF directly as base64 document to vision model
-        // OpenRouter vision models accept image_url with base64 data URIs
-        // We send the PDF as a base64 encoded data URI
-        messages = [
-          {
-            role: "user",
-            content: [
-              {
-                type: "text",
-                text: prompt,
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:application/pdf;base64,${pdfBase64}`,
-                },
-              } as OpenAI.Chat.ChatCompletionContentPart,
-            ],
+      // Add each image as a separate image_url content part
+      for (const base64Image of base64Images) {
+        content.push({
+          type: "image_url",
+          image_url: {
+            url: `data:image/jpeg;base64,${base64Image}`,
           },
-        ];
-      } else {
-        messages = [{ role: "user", content: prompt }];
+        });
       }
 
-      console.log(`[OpenRouter] Model: ${model}, attempt: ${attempt + 1}, mode: ${pdfBase64 ? "pdf-vision" : "text"}`);
+      const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+        { role: "user", content },
+      ];
+
+      console.log(`[OpenRouter Vision] Model: ${VISION_MODEL}, attempt: ${attempt + 1}, images: ${base64Images.length}`);
+
+      const completion = await openrouter.chat.completions.create({
+        model: VISION_MODEL,
+        messages,
+        max_tokens: 8192,
+        temperature: 0.7,
+      });
+
+      const responseText = completion.choices[0]?.message?.content || "";
+      if (!responseText) throw new Error("Empty response from OpenRouter");
+
+      console.log(`[OpenRouter Vision] Response length: ${responseText.length}`);
+      return responseText;
+    } catch (error) {
+      logErrorDetails(`OpenRouter Vision attempt ${attempt + 1}`, error);
+      if (attempt < maxRetries && isOverloadedError(error)) {
+        const delay = delays[attempt] || 4000;
+        console.log(`[OpenRouter Vision] Retrying after ${delay}ms...`);
+        await sleep(delay);
+        continue;
+      }
+      throw error;
+    }
+  }
+  throw new Error("503 Service Unavailable: Max retries exceeded");
+}
+
+async function callOpenRouterWithRetry(
+  prompt: string,
+  model: string,
+  maxRetries = 3
+): Promise<string> {
+  const delays = [1000, 2000, 4000];
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: "user", content: prompt }];
+
+      console.log(`[OpenRouter] Model: ${model}, attempt: ${attempt + 1}, mode: text`);
 
       const completion = await openrouter.chat.completions.create({
         model,
@@ -314,10 +400,26 @@ export async function POST(request: NextRequest) {
     let result: string | undefined;
 
     if (useVisionMode) {
-      // Convert buffer to base64 and send directly to vision model
-      // No canvas rendering needed — just raw PDF bytes as base64
-      const pdfBase64 = buffer.toString("base64");
-      console.log(`[Vision] Sending PDF as base64 (${pdfBase64.length} chars) to vision model`);
+      let base64Images: string[] = [];
+
+      try {
+        // Convert PDF to JPEG images
+        base64Images = await convertPdfToImages(buffer);
+        console.log(`[Vision] Converted PDF to ${base64Images.length} JPEG images`);
+      } catch (conversionError) {
+        logErrorDetails("PDF to Image conversion", conversionError);
+        return NextResponse.json(
+          { error: "Bhai, PDF process nahi ho raha 😵 Ek alag readable PDF try kar!" },
+          { status: 400 }
+        );
+      }
+
+      if (base64Images.length === 0) {
+        return NextResponse.json(
+          { error: "Bhai, PDF process nahi ho raha 😵 Ek alag readable PDF try kar!" },
+          { status: 400 }
+        );
+      }
 
       const visionPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT;
 
@@ -326,17 +428,17 @@ export async function POST(request: NextRequest) {
 
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
         try {
-          result = await callOpenRouterWithRetry(visionPrompt, VISION_MODEL, pdfBase64);
+          result = await callOpenRouterVisionMode(visionPrompt, base64Images);
           visionSucceeded = true;
           break;
         } catch (visionError) {
           logErrorDetails(`Vision attempt ${attempt + 1}`, visionError);
           const msg = visionError instanceof Error ? visionError.message.toLowerCase() : "";
 
-          // If vision model rejects the PDF format, fall back to text mode
+          // If vision model rejects the image format, fall back to text mode
           if (msg.includes("400") || msg.includes("422") || msg.includes("unsupported") ||
               msg.includes("invalid") || msg.includes("image") || msg.includes("multimodal")) {
-            console.log("[Vision] Model rejected PDF, falling back to text mode");
+            console.log("[Vision] Model rejected images, falling back to text mode");
             useVisionMode = false;
             break;
           }
@@ -425,9 +527,10 @@ export async function POST(request: NextRequest) {
         // Try simplified retry for vision mode
         if (useVisionMode) {
           try {
-            const pdfBase64 = buffer.toString("base64");
+            // Re-convert PDF to images for retry
+            const base64Images = await convertPdfToImages(buffer);
             const retryPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT + "\n\n" + SIMPLIFIED_JSON_PROMPT;
-            const retryText = await callOpenRouterWithRetry(retryPrompt, VISION_MODEL, pdfBase64);
+            const retryText = await callOpenRouterVisionMode(retryPrompt, base64Images);
             let retryCleaned = retryText;
             if (retryCleaned.startsWith("```json")) retryCleaned = retryCleaned.slice(7);
             else if (retryCleaned.startsWith("```")) retryCleaned = retryCleaned.slice(3);
