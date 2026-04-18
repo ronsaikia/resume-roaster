@@ -7,7 +7,12 @@ interface PdfjsLib {
   GlobalWorkerOptions: {
     workerSrc: string | false;
   };
-  getDocument: (options: { data: Uint8Array }) => {
+  getDocument: (options: {
+    data: Uint8Array;
+    useWorkerFetch?: boolean;
+    isEvalSupported?: boolean;
+    useSystemFonts?: boolean;
+  }) => {
     promise: Promise<PDFDocument>;
   };
 }
@@ -23,7 +28,6 @@ interface PDFPage {
   render: (options: {
     canvasContext: unknown;
     viewport: { width: number; height: number };
-    canvas: unknown;
   }) => { promise: Promise<void> };
 }
 
@@ -45,7 +49,7 @@ if (!process.env.NEXT_PUBLIC_SITE_URL) {
 
 // OpenRouter client - single instance
 const openrouter = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
+  baseURL: "https://openrouter.ai/api",
   apiKey: process.env.OPENROUTER_API_KEY || "",
   defaultHeaders: {
     "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
@@ -53,7 +57,14 @@ const openrouter = new OpenAI({
   },
 });
 
-const MODEL = "openrouter/free";
+// Best free text/reasoning model
+const TEXT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free";
+const TEXT_FALLBACKS = [
+  "meta-llama/llama-3.3-70b-instruct:free",
+  "openai/gpt-oss-120b:free",
+];
+// Only free vision-capable model in the list
+const VISION_MODEL = "nvidia/nemotron-nano-12b-v2-vl:free";
 
 // PDF parsing requires Node.js runtime
 export const runtime = "nodejs";
@@ -97,54 +108,51 @@ async function parsePDFWithPdfjs(buffer: Buffer): Promise<{ text: string }> {
   }
 }
 
-// Convert PDF pages to JPEG images for vision mode
 async function convertPDFToImages(buffer: Buffer): Promise<string[]> {
-  try {
-    const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs") as unknown as PdfjsLib;
-    pdfjsLib.GlobalWorkerOptions.workerSrc = false;
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { createCanvas } = require("@napi-rs/canvas") as typeof import("@napi-rs/canvas");
 
-    const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(buffer) });
-    const pdf = await loadingTask.promise;
+  const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs") as unknown as PdfjsLib;
+  pdfjsLib.GlobalWorkerOptions.workerSrc = false;
 
-    const images: string[] = [];
-    // Convert first 2 pages max to avoid huge payloads
-    const pagesToConvert = Math.min(pdf.numPages, 2);
+  const loadingTask = pdfjsLib.getDocument({
+    data: new Uint8Array(buffer),
+    useWorkerFetch: false,
+    isEvalSupported: false,
+    useSystemFonts: true,
+  });
+  const pdf = await loadingTask.promise;
 
-    for (let i = 1; i <= pagesToConvert; i++) {
-      const page = await pdf.getPage(i);
+  const images: string[] = [];
+  const pagesToConvert = Math.min(pdf.numPages, 2);
 
-      // Use 1.5x scale for good quality while keeping size reasonable
-      const scale = 1.5;
-      const viewport = page.getViewport({ scale });
+  for (let i = 1; i <= pagesToConvert; i++) {
+    const page = await pdf.getPage(i);
+    const scale = 1.5;
+    const viewport = page.getViewport({ scale });
 
-      // Create canvas using Node.js canvas API
-      // @napi-rs/canvas should be available as it's in dependencies
-      const { createCanvas } = await import("@napi-rs/canvas");
-      const canvas = createCanvas(viewport.width, viewport.height);
-      const context = canvas.getContext("2d");
+    const canvas = createCanvas(Math.ceil(viewport.width), Math.ceil(viewport.height));
+    const ctx = canvas.getContext("2d");
 
-      // Render PDF page to canvas
-      // pdfjs needs both canvas and canvasContext for server-side rendering
-      await page.render({
-        canvasContext: context as unknown as CanvasRenderingContext2D,
-        viewport: viewport,
-        canvas: canvas as unknown as HTMLCanvasElement,
-      }).promise;
+    // White background so text is readable
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      // Export as JPEG base64
-      const jpegBuffer = await canvas.encode("jpeg", 85);
-      const base64Image = jpegBuffer.toString("base64");
-      images.push(base64Image);
+    // pdfjs v5: pass ONLY canvasContext + viewport — the canvas: property was removed
+    await page.render({
+      canvasContext: ctx as unknown,
+      viewport: viewport,
+    }).promise;
 
-      console.log(`[PDF Vision] Converted page ${i} to JPEG: ${base64Image.length} chars base64`);
-    }
-
-    return images;
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error("[PDF Vision] Failed to convert PDF to images:", msg);
-    throw error;
+    const jpegBuffer = await canvas.encode("jpeg", 85);
+    images.push(jpegBuffer.toString("base64"));
+    console.log(`[PDF Vision] Page ${i}: ${canvas.width}x${canvas.height}, ${jpegBuffer.length} bytes`);
   }
+
+  if (images.length === 0) {
+    throw new Error("PDF_RENDER_FAIL: no pages rendered");
+  }
+  return images;
 }
 
 // Parse PDF using pure regex approach - fallback when pdfjs fails
@@ -261,6 +269,7 @@ function isOverloadedError(error: unknown): boolean {
 
 async function callOpenRouterWithRetry(
   prompt: string,
+  model: string,
   imageBase64List?: string[],
   maxRetries = 3
 ): Promise<string> {
@@ -303,7 +312,7 @@ async function callOpenRouterWithRetry(
       }
 
       const completion = await openrouter.chat.completions.create({
-        model: MODEL,
+        model: model,
         messages,
         max_tokens: 8192,
         temperature: 0.7,
@@ -491,12 +500,8 @@ export async function POST(request: NextRequest) {
         imageBase64List = await convertPDFToImages(buffer);
         console.log(`[PDF Vision] Converted ${imageBase64List.length} pages to JPEG`);
       } catch (error) {
-        console.error("[PDF Vision] Failed to convert PDF to images:", error);
-        // If PDF conversion fails, we can't do vision mode - return error
-        return NextResponse.json(
-          { error: "Could not process PDF for visual analysis. Please try a different file." },
-          { status: 400 }
-        );
+        // Re-throw — outer catch will produce the Hinglish error message
+        throw error;
       }
     }
 
@@ -518,6 +523,7 @@ export async function POST(request: NextRequest) {
           const visionPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT;
           const visionResponse = await callOpenRouterWithRetry(
             visionPrompt,
+            VISION_MODEL,
             imageBase64List
           );
           result = visionResponse;
@@ -539,11 +545,27 @@ export async function POST(request: NextRequest) {
           // Truncate very long resumes to avoid token limits
           const truncatedText = pdfText.slice(0, 15000);
 
-          // Call OpenRouter API with text prompt
           console.log("[OpenRouter] Using text mode with extracted PDF text");
           const textPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + ANALYSIS_PROMPT(truncatedText);
-          const textResponse = await callOpenRouterWithRetry(textPrompt);
-          result = textResponse;
+          const textModels = [TEXT_MODEL, ...TEXT_FALLBACKS];
+          let textResult: string | undefined;
+          for (const m of textModels) {
+            try {
+              textResult = await callOpenRouterWithRetry(textPrompt, m);
+              break;
+            } catch (err) {
+              const msg = err instanceof Error ? err.message.toLowerCase() : "";
+              const isOverload = msg.includes("503") || msg.includes("429") ||
+                msg.includes("overloaded") || msg.includes("rate limit");
+              if (isOverload && m !== textModels[textModels.length - 1]) {
+                console.log(`[Text] ${m} overloaded, trying next model...`);
+                await sleep(1500);
+                continue;
+              }
+              throw err;
+            }
+          }
+          result = textResult;
         }
 
         // If we get here, the call succeeded - break out of retry loop
@@ -600,6 +622,7 @@ export async function POST(request: NextRequest) {
             const retryPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT + "\n\n" + SIMPLIFIED_JSON_PROMPT;
             const retryText = await callOpenRouterWithRetry(
               retryPrompt,
+              VISION_MODEL,
               imageBase64List
             );
             let retryCleaned = retryText;
@@ -675,6 +698,31 @@ export async function POST(request: NextRequest) {
 
     // Check for specific error types to show user-friendly messages
     const errorMessage = error instanceof Error ? error.message.toLowerCase() : "";
+
+    // PDF canvas render failure — pdfjs or @napi-rs/canvas crashed
+    if (
+      errorMessage.includes("pdf_render_fail") ||
+      errorMessage.includes("cannot read properties") ||
+      errorMessage.includes("encode") ||
+      errorMessage.includes("napi")
+    ) {
+      return NextResponse.json(
+        { error: "Tera PDF render nahi ho raha bhai 😵 Normal digital PDF upload kar, scanned image wala nahi chalega!" },
+        { status: 400 }
+      );
+    }
+
+    // Vision model specifically failed (model returned error about images)
+    if (
+      errorMessage.includes("image_url") ||
+      errorMessage.includes("multimodal") ||
+      errorMessage.includes("vision")
+    ) {
+      return NextResponse.json(
+        { error: "Vision model abhi busy hai 😤 Thodi der baad retry kar, ya ek readable PDF try kar!" },
+        { status: 503 }
+      );
+    }
 
     // Service overload errors - show friendly retry message
     if (
