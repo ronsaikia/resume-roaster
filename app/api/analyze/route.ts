@@ -53,7 +53,7 @@ const openrouter = new OpenAI({
   },
 });
 
-const MODEL = "google/gemini-2.5-flash";
+const MODEL = "openrouter/free";
 
 // PDF parsing requires Node.js runtime
 export const runtime = "nodejs";
@@ -305,7 +305,7 @@ async function callOpenRouterWithRetry(
       const completion = await openrouter.chat.completions.create({
         model: MODEL,
         messages,
-        max_tokens: 4096,
+        max_tokens: 8192,
         temperature: 0.7,
       });
 

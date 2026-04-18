@@ -17,8 +17,6 @@ import ATSChecker from "@/components/ATSChecker";
 import FeedbackSection from "@/components/FeedbackSection";
 import ReportDownload from "@/components/ReportDownload";
 import { ResumeAnalysis, CategoryKey, sectionLabels, getScoreReaction } from "@/lib/types";
-import Link from "next/link";
-import { ArrowLeft } from "lucide-react";
 
 // Toast notification component
 interface ToastProps {
@@ -69,11 +67,21 @@ export default function ResultsPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [showToast, setShowToast] = useState(false);
   const [copied, setCopied] = useState(false);
-  const [reactionSeed] = useState(() => Math.random());
+  const [reactionSeed] = useState(() => {
+    if (typeof window === 'undefined') return 0.5;
+    try {
+      const stored = localStorage.getItem('resumeAnalysis');
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        return (parsed.overallScore ?? 50) / 100;
+      }
+    } catch {}
+    return 0.5;
+  });
 
   useEffect(() => {
-    // Get analysis from sessionStorage
-    const stored = sessionStorage.getItem("resumeAnalysis");
+    // Get analysis from localStorage
+    const stored = localStorage.getItem("resumeAnalysis");
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
@@ -92,13 +100,13 @@ export default function ResultsPage() {
           }, 1000);
         }
       } catch (e) {
-        console.error("Failed to parse analysis from sessionStorage:", e);
+        console.error("Failed to parse analysis from localStorage:", e);
         setIsLoading(false);
         router.push("/");
         return;
       }
     } else {
-      console.error("No analysis found in sessionStorage, redirecting to home");
+      console.error("No analysis found in localStorage, redirecting to home");
       setIsLoading(false);
       router.push("/");
       return;
@@ -150,31 +158,6 @@ export default function ResultsPage() {
   return (
     <div style={{ minHeight: '100vh', height: 'fit-content', overflow: 'hidden' }}>
       <Navbar />
-
-      {/* Back to Home Button - Fixed position in navbar area */}
-      <motion.div
-        initial={{ opacity: 0, x: -20 }}
-        animate={{ opacity: 1, x: 0 }}
-        transition={{ delay: 0.5 }}
-        className="fixed top-[72px] left-4 z-40"
-      >
-        <Link
-          href="/"
-          className="flex items-center gap-2 px-4 py-2 bg-white text-[#1a1a1a] font-bold text-sm
-                     border-4 border-[#1a1a1a] hover:translate-x-[2px] hover:translate-y-[2px]
-                     transition-all duration-100"
-          style={{ boxShadow: '4px 4px 0px #1a1a1a' }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.boxShadow = '2px 2px 0px #1a1a1a';
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.boxShadow = '4px 4px 0px #1a1a1a';
-          }}
-        >
-          <ArrowLeft className="w-4 h-4" />
-          Back to Home
-        </Link>
-      </motion.div>
 
       <main className="min-h-screen bg-[#f0ede8] overflow-x-hidden pt-8">
         <div className="pt-24 pb-8 px-4 sm:px-6 lg:px-8">

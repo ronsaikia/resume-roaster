@@ -430,8 +430,8 @@ export default function Home() {
         throw new Error(serverError);
       }
 
-      // Store analysis in sessionStorage
-      sessionStorage.setItem("resumeAnalysis", JSON.stringify(data));
+      // Store analysis in localStorage
+      localStorage.setItem("resumeAnalysis", JSON.stringify(data));
 
       // Trigger confetti if score is high
       if (data.overallScore > 80) {
@@ -537,7 +537,7 @@ export default function Home() {
     };
 
     // Store the analysis first
-    sessionStorage.setItem("resumeAnalysis", JSON.stringify(randomizedDemo));
+    localStorage.setItem("resumeAnalysis", JSON.stringify(randomizedDemo));
 
     // Simulate loading delay to show loading messages (6 seconds)
     await new Promise(resolve => setTimeout(resolve, 6000));

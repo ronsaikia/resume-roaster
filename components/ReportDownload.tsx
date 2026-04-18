@@ -57,7 +57,7 @@ export default function ReportDownload({ analysis }: ReportDownloadProps) {
   };
 
   const handleReset = () => {
-    sessionStorage.removeItem("resumeAnalysis");
+    localStorage.removeItem("resumeAnalysis");
     window.location.href = "/";
   };
 
