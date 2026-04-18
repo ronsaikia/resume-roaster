@@ -10,20 +10,51 @@ interface PdfjsLib {
     isEvalSupported?: boolean;
     useSystemFonts?: boolean;
     disableWorker?: boolean;
+    canvasFactory?: CanvasFactory;
   }) => { promise: Promise<PDFDocument> };
 }
+
+interface CanvasFactory {
+  create: (width: number, height: number) => { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D };
+  destroy: (canvasAndContext: { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D }) => void;
+}
+
 interface PDFDocument {
   numPages: number;
   getPage: (pageNum: number) => Promise<PDFPage>;
   destroy?: () => void;
 }
+
 interface PDFPage {
   getViewport: (options: { scale: number }) => { width: number; height: number };
   getTextContent: () => Promise<TextContent>;
   render: (options: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => { promise: Promise<void> };
 }
-interface TextContent { items: TextItem[] }
-interface TextItem { str?: string }
+
+interface TextContent {
+  items: Array<TextItem | TextMarkedContent>;
+}
+
+interface TextItem {
+  str?: string;
+  dir?: string;
+  width?: number;
+  height?: number;
+  transform?: number[];
+  fontName?: string;
+  hasEOL?: boolean;
+}
+
+interface TextMarkedContent {
+  type: 'beginMarkedContent' | 'endMarkedContent';
+  tag?: string;
+  items?: Array<TextItem | TextMarkedContent>;
+}
+
+// Extend Canvas types for Node canvas
+interface NodeCanvas {
+  toBuffer(format: 'image/jpeg', options?: { quality?: number }): Buffer;
+}
 
 if (!process.env.OPENROUTER_API_KEY) {
   console.error("[Startup] OPENROUTER_API_KEY is not set!");
@@ -51,6 +82,24 @@ export const dynamic = "force-dynamic";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+/**
+ * Extract text from text content items recursively (handles marked content)
+ */
+function extractTextFromItems(items: Array<TextItem | TextMarkedContent>): string {
+  const textParts: string[] = [];
+
+  for (const item of items) {
+    if ('str' in item && item.str !== undefined) {
+      textParts.push(item.str);
+    } else if ('type' in item && item.type === 'beginMarkedContent' && item.items) {
+      // Recursively extract text from marked content groups
+      textParts.push(extractTextFromItems(item.items));
+    }
+  }
+
+  return textParts.join(' ');
+}
+
 async function convertPdfToImages(buffer: Buffer): Promise<string[]> {
   const base64Images: string[] = [];
 
@@ -59,8 +108,23 @@ async function convertPdfToImages(buffer: Buffer): Promise<string[]> {
     const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs") as unknown as PdfjsLib;
     pdfjsLib.GlobalWorkerOptions.workerSrc = false;
 
-    // Dynamically import createCanvas from @napi-rs/canvas
-    const { createCanvas } = await import("@napi-rs/canvas");
+    // Dynamically import canvas package
+    const canvasModule = await import("canvas");
+    const { createCanvas } = canvasModule;
+
+    // Create a canvas factory for pdfjs-dist
+    const canvasFactory: CanvasFactory = {
+      create(width: number, height: number) {
+        const canvas = createCanvas(width, height);
+        const context = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
+        return { canvas: canvas as unknown as HTMLCanvasElement, context };
+      },
+      destroy(canvasAndContext: { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D }) {
+        // Canvas cleanup if needed
+        canvasAndContext.canvas.width = 0;
+        canvasAndContext.canvas.height = 0;
+      }
+    };
 
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(buffer),
@@ -68,6 +132,7 @@ async function convertPdfToImages(buffer: Buffer): Promise<string[]> {
       isEvalSupported: false,
       useSystemFonts: true,
       disableWorker: true,
+      canvasFactory,
     });
 
     const pdf = await loadingTask.promise;
@@ -77,18 +142,22 @@ async function convertPdfToImages(buffer: Buffer): Promise<string[]> {
       const page = await pdf.getPage(pageNum);
       const viewport = page.getViewport({ scale: 1.5 });
 
-      const canvas = createCanvas(viewport.width, viewport.height);
-      const context = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
+      // Create canvas using the factory
+      const canvasAndContext = canvasFactory.create(viewport.width, viewport.height);
 
       await page.render({
-        canvasContext: context,
+        canvasContext: canvasAndContext.context,
         viewport: viewport,
       }).promise;
 
-      // Export as JPEG base64
-      const jpegBuffer = await canvas.encode("jpeg");
-      const base64String = jpegBuffer.toString("base64");
+      // Export as JPEG base64 using node-canvas API
+      const nodeCanvas = canvasAndContext.canvas as unknown as NodeCanvas;
+      const jpegBuffer = nodeCanvas.toBuffer('image/jpeg', { quality: 0.85 });
+      const base64String = jpegBuffer.toString('base64');
       base64Images.push(base64String);
+
+      // Clean up
+      canvasFactory.destroy(canvasAndContext);
     }
 
     // Clean up PDF document
@@ -118,14 +187,16 @@ async function parsePDFWithPdfjs(buffer: Buffer): Promise<{ text: string }> {
     const pdf = await loadingTask.promise;
     let fullText = "";
     const pagesToProcess = Math.min(pdf.numPages, 5);
+
     for (let i = 1; i <= pagesToProcess; i++) {
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
-      const pageText = textContent.items
-        .map((item) => ("str" in item ? item.str : ""))
-        .join(" ");
+
+      // Use aggressive text extraction that handles all item types
+      const pageText = extractTextFromItems(textContent.items);
       fullText += pageText + "\n";
     }
+
     const trimmedText = fullText.trim();
     console.log(`[PDF Parse] pdfjs extracted ${trimmedText.length} chars`);
     return { text: trimmedText };
@@ -401,6 +472,7 @@ export async function POST(request: NextRequest) {
 
     if (useVisionMode) {
       let base64Images: string[] = [];
+      let conversionFailed = false;
 
       try {
         // Convert PDF to JPEG images
@@ -408,58 +480,63 @@ export async function POST(request: NextRequest) {
         console.log(`[Vision] Converted PDF to ${base64Images.length} JPEG images`);
       } catch (conversionError) {
         logErrorDetails("PDF to Image conversion", conversionError);
-        return NextResponse.json(
-          { error: "Bhai, PDF process nahi ho raha 😵 Ek alag readable PDF try kar!" },
-          { status: 400 }
-        );
+        conversionFailed = true;
       }
 
-      if (base64Images.length === 0) {
-        return NextResponse.json(
-          { error: "Bhai, PDF process nahi ho raha 😵 Ek alag readable PDF try kar!" },
-          { status: 400 }
-        );
-      }
-
-      const visionPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT;
-
-      const maxAttempts = 3;
-      let visionSucceeded = false;
-
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        try {
-          result = await callOpenRouterVisionMode(visionPrompt, base64Images);
-          visionSucceeded = true;
-          break;
-        } catch (visionError) {
-          logErrorDetails(`Vision attempt ${attempt + 1}`, visionError);
-          const msg = visionError instanceof Error ? visionError.message.toLowerCase() : "";
-
-          // If vision model rejects the image format, fall back to text mode
-          if (msg.includes("400") || msg.includes("422") || msg.includes("unsupported") ||
-              msg.includes("invalid") || msg.includes("image") || msg.includes("multimodal")) {
-            console.log("[Vision] Model rejected images, falling back to text mode");
-            useVisionMode = false;
-            break;
-          }
-
-          if (isOverloadedError(visionError) && attempt < maxAttempts - 1) {
-            await sleep(2000 * (attempt + 1));
-            continue;
-          }
-          throw visionError;
-        }
-      }
-
-      // If vision failed and we have no text, this PDF can't be processed
-      if (!visionSucceeded && !useVisionMode) {
-        if (!pdfText || pdfText.trim().length < 10) {
+      // Graceful degradation: if conversion failed but we have some text, fall back to text mode
+      if (conversionFailed || base64Images.length === 0) {
+        if (pdfText && pdfText.trim().length > 10) {
+          console.log("[Vision] Conversion failed, falling back to text mode with partial text");
+          useVisionMode = false;
+        } else {
           return NextResponse.json(
             { error: "Bhai, PDF process nahi ho raha 😵 Ek alag readable PDF try kar!" },
             { status: 400 }
           );
         }
-        // Fall through to text mode with whatever text we have
+      }
+
+      if (useVisionMode) {
+        const visionPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT;
+
+        const maxAttempts = 3;
+        let visionSucceeded = false;
+
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+          try {
+            result = await callOpenRouterVisionMode(visionPrompt, base64Images);
+            visionSucceeded = true;
+            break;
+          } catch (visionError) {
+            logErrorDetails(`Vision attempt ${attempt + 1}`, visionError);
+            const msg = visionError instanceof Error ? visionError.message.toLowerCase() : "";
+
+            // If vision model rejects the image format, fall back to text mode
+            if (msg.includes("400") || msg.includes("422") || msg.includes("unsupported") ||
+                msg.includes("invalid") || msg.includes("image") || msg.includes("multimodal")) {
+              console.log("[Vision] Model rejected images, falling back to text mode");
+              useVisionMode = false;
+              break;
+            }
+
+            if (isOverloadedError(visionError) && attempt < maxAttempts - 1) {
+              await sleep(2000 * (attempt + 1));
+              continue;
+            }
+            throw visionError;
+          }
+        }
+
+        // If vision failed and we have no text, this PDF can't be processed
+        if (!visionSucceeded && !useVisionMode) {
+          if (!pdfText || pdfText.trim().length < 10) {
+            return NextResponse.json(
+              { error: "Bhai, PDF process nahi ho raha 😵 Ek alag readable PDF try kar!" },
+              { status: 400 }
+            );
+          }
+          // Fall through to text mode with whatever text we have
+        }
       }
     }
 
