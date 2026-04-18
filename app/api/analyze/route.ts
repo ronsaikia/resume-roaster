@@ -81,6 +81,22 @@ function extractTextFromItems(items: Array<TextItem | TextMarkedContent>): strin
 
 async function parsePDFWithPdfjs(buffer: Buffer): Promise<{ text: string }> {
   try {
+    // Polyfill missing browser APIs for Node.js
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (typeof (globalThis as any).DOMMatrix === 'undefined') {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (globalThis as any).DOMMatrix = class DOMMatrix {
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        constructor(_init?: string | number[]) {}
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
+        static fromMatrix(_other?: unknown) { return new (globalThis as { DOMMatrix: new () => unknown }).DOMMatrix(); }
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        static fromFloat32Array(_arr: Float32Array) { return new (globalThis as { DOMMatrix: new () => unknown }).DOMMatrix(); }
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        static fromFloat64Array(_arr: Float64Array) { return new (globalThis as { DOMMatrix: new () => unknown }).DOMMatrix(); }
+      };
+    }
+
     const pdfjsLib = await import("pdfjs-dist") as unknown as PdfjsLib;
     pdfjsLib.GlobalWorkerOptions.workerSrc = false;
 

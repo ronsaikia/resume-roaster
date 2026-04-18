@@ -29,6 +29,17 @@ const hindiButtonTexts = [
 // Emojis for the modal
 const modalEmojis = ["🤡", "💀"];
 
+// Invalid document messages - randomly selected on client side
+const invalidDocumentMessages = [
+  "Bhai, ye resume hai? Bijli ka bill upload kar diya kya?",
+  "Uploaded document is as irrelevant as your 1st-year engineering syllabus.",
+  "Tinder bio de diya kya? Because HR isn't swiping right on this either.",
+  "Aadhaar card upload mat kar bhai, job CV pe milti hai.",
+  "Kya Matlab? Kuch bhi upload karega?",
+  "Bhai ye kya hai? Resume nahi hai toh mat bhej!",
+  "Yaar, ye document dekh ke HR ne chai pi li aur window minimize kar di.",
+];
+
 // Demo roast headlines (15 options from analyzePrompt.ts)
 const demoRoastHeadlines = [
   "Bhai, tera resume dekh ke HR ne chai pi li aur ghost kar diya.",
@@ -414,10 +425,13 @@ export default function Home() {
 
       // Check for invalid document error
       if (data.status === "invalid_document") {
-        // Use server-provided message directly (no re-randomizing)
+        // Always pick a random message from the client-side array
+        const randomMsg = invalidDocumentMessages[
+          Math.floor(Math.random() * invalidDocumentMessages.length)
+        ];
         setInvalidDocError({
           status: "invalid_document",
-          message: data.message,
+          message: randomMsg,
         });
         setIsLoading(false);
         return;

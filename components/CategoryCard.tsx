@@ -67,7 +67,7 @@ function CategoryCard({
       {/* Header */}
       <div className="flex items-center justify-between mb-3 gap-3">
         <div className="flex-1 min-w-0">
-          <h3 className="font-syne font-black text-lg tracking-tight text-[#1a1a1a]">{label.title}</h3>
+          <h3 className="font-black text-lg tracking-tight text-[#1a1a1a]">{label.title}</h3>
         </div>
 
         {/* Score fraction - RIGHT aligned, large */}

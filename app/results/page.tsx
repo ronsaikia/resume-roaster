@@ -190,38 +190,33 @@ export default function ResultsPage() {
                 initial={{ opacity: 0, scale: 0.8 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ delay: 0.5 }}
-                className="flex justify-center mb-8"
+                className="flex justify-center mb-10 px-2"
               >
                 <div
-                  className={`inline-flex items-center gap-3 px-6 py-3 bg-white border-4 border-[#1a1a1a] font-mono font-bold text-lg
-                    hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[8px_8px_0px_#1a1a1a] transition-all duration-100 cursor-default min-w-[280px] justify-center`}
+                  className={`inline-flex flex-col sm:flex-row items-center gap-3 px-8 py-5 bg-white border-4 border-[#1a1a1a] font-mono font-bold text-xl sm:text-2xl
+                    hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[10px_10px_0px_#1a1a1a] transition-all duration-100 cursor-pointer justify-center text-center`}
                   style={{
-                    boxShadow: '4px 4px 0px #1a1a1a',
+                    boxShadow: '6px 6px 0px #1a1a1a',
                     borderColor: analysis.overallScore >= 70 ? '#22c55e' :
-                                analysis.overallScore >= 50 ? '#eab308' : '#ef4444'
+                      analysis.overallScore >= 50 ? '#eab308' : '#ef4444'
                   }}
                 >
-                  <span className="text-2xl leading-none">{scoreReaction.emoji}</span>
-                  <span style={{ color: scoreReaction.color }} className="leading-none">
+                  <span className="text-3xl leading-none">{scoreReaction.emoji}</span>
+                  <span style={{ color: scoreReaction.color }} className="leading-snug">
                     {scoreReaction.text}
                   </span>
                 </div>
               </motion.div>
 
-              {/* Roast Headline - Editorial Style */}
+              {/* Roast Headline */}
               <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mb-8"
+                className="my-12 px-2"
               >
-                <span className="text-7xl md:text-9xl text-[#e8441a] font-serif leading-none">&ldquo;</span>
-                <h1
-                  className="font-syne text-gradient-fire inline"
-                  style={{ fontSize: 'clamp(2.5rem, 6vw, 5rem)', fontWeight: 900 }}
-                >
-                  {analysis.roastHeadline}
+                <h1 className="text-3xl sm:text-4xl md:text-6xl font-bold text-[#e8441a] leading-snug sm:leading-snug md:leading-tight">
+                  &ldquo;{analysis.roastHeadline}&rdquo;
                 </h1>
-                <span className="text-7xl md:text-9xl text-[#e8441a] font-serif leading-none">&rdquo;</span>
               </motion.div>
 
               {/* Roast Quote Card - Neo-brutalist with hover */}
@@ -253,10 +248,8 @@ export default function ResultsPage() {
                 viewport={{ once: true }}
                 className="mb-8"
               >
-                <p className="text-xs font-mono text-[#1a1a1a] uppercase tracking-widest mb-2 font-bold">
-                  {'// SCORE_BREAKDOWN'}
-                </p>
-                <h2 className="text-2xl sm:text-3xl font-bold font-syne text-[#1a1a1a]">Score Breakdown</h2>
+
+                <h2 className="text-3xl sm:text-4xl md:text-5xl font-black font-syne text-[#1a1a1a] tracking-tight">Score Breakdown</h2>
                 <p className="text-[#1a1a1a] mt-1 font-medium">Detailed analysis across 7 key dimensions</p>
               </motion.div>
 
@@ -280,10 +273,8 @@ export default function ResultsPage() {
                 viewport={{ once: true }}
                 className="mb-8"
               >
-                <p className="text-xs font-mono text-[#1a1a1a] uppercase tracking-widest mb-2 font-bold">
-                  {'// SECTION_DETECTION'}
-                </p>
-                <h2 className="text-2xl sm:text-3xl font-bold font-syne text-[#1a1a1a]">Section Detection</h2>
+
+                <h2 className="text-3xl sm:text-4xl md:text-5xl font-black font-syne text-[#1a1a1a] tracking-tight">Section Detection</h2>
                 <p className="text-[#1a1a1a] mt-1 font-medium">Which sections we found in your resume</p>
               </motion.div>
 
@@ -311,13 +302,12 @@ export default function ResultsPage() {
                           <XCircle className="w-6 h-6 text-red-500" />
                         )}
                         <span
-                          className={`text-sm text-center font-bold ${
-                            detected ? "text-[#1a1a1a]" : "text-[#6b6b6b]"
-                          }`}
+                          className={`text-sm text-center font-bold ${detected ? "text-[#1a1a1a]" : "text-[#6b6b6b]"
+                            }`}
                         >
                           {
                             sectionLabels[
-                              section as keyof typeof sectionLabels
+                            section as keyof typeof sectionLabels
                             ]
                           }
                         </span>
@@ -356,10 +346,8 @@ export default function ResultsPage() {
                 viewport={{ once: true }}
                 className="mb-8"
               >
-                <p className="text-xs font-mono text-[#1a1a1a] uppercase tracking-widest mb-2 font-bold">
-                  {'// ATS_COMPATIBILITY'}
-                </p>
-                <h2 className="text-2xl sm:text-3xl font-bold font-syne text-[#1a1a1a]">ATS Compatibility</h2>
+
+                <h2 className="text-3xl sm:text-4xl md:text-5xl font-black font-syne text-[#1a1a1a] tracking-tight">ATS Compatibility</h2>
                 <p className="text-[#1a1a1a] mt-1 font-medium">How well your resume performs with Applicant Tracking Systems</p>
               </motion.div>
 
@@ -374,10 +362,8 @@ export default function ResultsPage() {
                 viewport={{ once: true }}
                 className="mb-8"
               >
-                <p className="text-xs font-mono text-[#1a1a1a] uppercase tracking-widest mb-2 font-bold">
-                  {'// FEEDBACK'}
-                </p>
-                <h2 className="text-2xl sm:text-3xl font-bold font-syne text-[#1a1a1a]">The Good vs The Ugly</h2>
+
+                <h2 className="text-3xl sm:text-4xl md:text-5xl font-black font-syne text-[#1a1a1a] tracking-tight">The Good vs The Ugly</h2>
               </motion.div>
 
               <FeedbackSection
@@ -394,10 +380,8 @@ export default function ResultsPage() {
                 viewport={{ once: true }}
                 className="mb-8"
               >
-                <p className="text-xs font-mono text-[#1a1a1a] uppercase tracking-widest mb-2 font-bold">
-                  {'// ACTION_PLAN'}
-                </p>
-                <h2 className="text-2xl sm:text-3xl font-bold font-syne text-[#1a1a1a]">Your Action Plan</h2>
+
+                <h2 className="text-3xl sm:text-4xl md:text-5xl font-black font-syne text-[#1a1a1a] tracking-tight">Your Action Plan</h2>
                 <p className="text-[#1a1a1a] mt-1 font-medium">Prioritized steps to improve your resume</p>
               </motion.div>
 
@@ -420,13 +404,12 @@ export default function ResultsPage() {
                       {String(index + 1).padStart(2, '0')}
                     </span>
                     <span
-                      className={`px-3 py-1 text-xs font-bold uppercase border-2 ${
-                        action.priority === "HIGH"
-                          ? "bg-red-500 text-white border-red-700"
-                          : action.priority === "MEDIUM"
+                      className={`px-3 py-1 text-xs font-bold uppercase border-2 ${action.priority === "HIGH"
+                        ? "bg-red-500 text-white border-red-700"
+                        : action.priority === "MEDIUM"
                           ? "bg-yellow-500 text-black border-yellow-700"
                           : "bg-[#e8441a] text-white border-[#d63b14]"
-                      }`}
+                        }`}
                     >
                       {action.priority}
                     </span>
@@ -447,7 +430,7 @@ export default function ResultsPage() {
                   transition-all duration-100 cursor-default"
                 style={{ boxShadow: '6px 6px 0px #1a1a1a' }}
               >
-                <h2 className="text-2xl font-bold text-[#1a1a1a] mb-4">
+                <h2 className="text-3xl sm:text-4xl md:text-5xl font-black text-[#1a1a1a] mb-6 tracking-tight">
                   Ready to make your resume fire? 🔥
                 </h2>
                 <p className="text-[#1a1a1a] mb-8 max-w-lg mx-auto font-medium">

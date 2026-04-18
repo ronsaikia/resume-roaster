@@ -35,7 +35,7 @@ export default function Navbar() {
                   />
                 </div>
                 <span
-                  className="font-syne font-bold text-[1.25rem] sm:text-[1.5rem] md:text-[2rem] text-[#1a1a1a] leading-none tracking-normal"
+                  className="font-syne font-extrabold text-[1.25rem] sm:text-[1.5rem] md:text-[2rem] text-[#1a1a1a] leading-none tracking-tight"
                   style={{ fontFamily: 'var(--font-syne)' }}
                 >
                   JhalmuriCV

@@ -53,6 +53,24 @@ Select or adapt from these ROAST QUOTES (pick most relevant based on the resume)
 9. "Beta, tu '3 years experience as fresher' wala meme ban raha hai. Internship ko 'Software Engineer' mat likh, recruiters pakad lete hain jhoot. Aur agar sach mein 3 saal kaam kiya hai, toh achievements kahan hain?"
 10. "Resume mein ' IIT preparation' likh ke kya prove karna chahta hai? Ki tu drop year mein bhi select nahi hua? Abhi bhi time hai - skills build kar, projects bana, yeh past ki dukh bhari kahani mat suna."
 
+CRITICAL - INVALID DOCUMENT DETECTION: Before doing any resume analysis, check if this document is clearly NOT a resume or CV. If it is obviously something else (utility bill, Aadhaar/PAN card, grocery receipt, photo, blank page, ticket, menu, certificate, etc.), you MUST return ONLY this JSON and nothing else:
+{
+  "status": "invalid_document",
+  "message": "<pick one savagely funny Hinglish message from this list>",
+  "error": "Invalid document uploaded"
+}
+Available messages to choose from (pick randomly based on what you see):
+
+"Bhai, ye resume hai? Bijli ka bill upload kar diya kya?"
+"Uploaded document is as irrelevant as your 1st-year engineering syllabus."
+"Tinder bio de diya kya? Because HR isn't swiping right on this either."
+"Aadhaar card upload mat kar bhai, job CV pe milti hai."
+"Kya Matlab? Kuch bhi upload karega?"
+"Bhai ye kya hai? Resume nahi hai toh mat bhej!"
+"Yaar, ye document dekh ke HR ne window minimize kar di."
+
+ONLY proceed with the full resume analysis JSON if the document clearly IS a resume or CV.
+
 Provide your analysis in this EXACT JSON structure:
 
 {
@@ -200,6 +218,24 @@ Select or adapt from these ROAST QUOTES (pick most relevant based on the resume)
 8. "Campus placement mein shortlist nahi hua toh off-campus apply kar raha hai? Strategy same hai, result bhi same hoga. Yeh 'quick learner' wala tagline hata - 4 saal mein itna nahi seekha ki resume theek ban sake."
 9. "Beta, tu '3 years experience as fresher' wala meme ban raha hai. Internship ko 'Software Engineer' mat likh, recruiters pakad lete hain jhoot. Aur agar sach mein 3 saal kaam kiya hai, toh achievements kahan hain?"
 10. "Resume mein ' IIT preparation' likh ke kya prove karna chahta hai? Ki tu drop year mein bhi select nahi hua? Abhi bhi time hai - skills build kar, projects bana, yeh past ki dukh bhari kahani mat suna."
+
+CRITICAL - INVALID DOCUMENT DETECTION: Before doing any resume analysis, check if this document is clearly NOT a resume or CV. If it is obviously something else (utility bill, Aadhaar/PAN card, grocery receipt, photo, blank page, ticket, menu, certificate, etc.), you MUST return ONLY this JSON and nothing else:
+{
+  "status": "invalid_document",
+  "message": "<pick one savagely funny Hinglish message from this list>",
+  "error": "Invalid document uploaded"
+}
+Available messages to choose from (pick randomly based on what you see):
+
+"Bhai, ye resume hai? Bijli ka bill upload kar diya kya?"
+"Uploaded document is as irrelevant as your 1st-year engineering syllabus."
+"Tinder bio de diya kya? Because HR isn't swiping right on this either."
+"Aadhaar card upload mat kar bhai, job CV pe milti hai."
+"Kya Matlab? Kuch bhi upload karega?"
+"Bhai ye kya hai? Resume nahi hai toh mat bhej!"
+"Yaar, ye document dekh ke HR ne chai pi li aur window minimize kar di."
+
+ONLY proceed with the full resume analysis JSON if the document clearly IS a resume or CV.
 
 Provide your analysis in this EXACT JSON structure:
 
