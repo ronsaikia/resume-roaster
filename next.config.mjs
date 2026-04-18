@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ['canvas', 'pdfjs-dist'],
+    serverComponentsExternalPackages: ['pdfjs-dist'],
   },
 };
 

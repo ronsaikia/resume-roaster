@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 import { SYSTEM_PROMPT, ANALYSIS_PROMPT, VISION_ANALYSIS_PROMPT, SIMPLIFIED_JSON_PROMPT } from "@/lib/analyzePrompt";
 
 interface PdfjsLib {
@@ -10,13 +10,7 @@ interface PdfjsLib {
     isEvalSupported?: boolean;
     useSystemFonts?: boolean;
     disableWorker?: boolean;
-    canvasFactory?: CanvasFactory;
   }) => { promise: Promise<PDFDocument> };
-}
-
-interface CanvasFactory {
-  create: (width: number, height: number) => { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D };
-  destroy: (canvasAndContext: { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D }) => void;
 }
 
 interface PDFDocument {
@@ -26,9 +20,7 @@ interface PDFDocument {
 }
 
 interface PDFPage {
-  getViewport: (options: { scale: number }) => { width: number; height: number };
   getTextContent: () => Promise<TextContent>;
-  render: (options: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => { promise: Promise<void> };
 }
 
 interface TextContent {
@@ -37,45 +29,12 @@ interface TextContent {
 
 interface TextItem {
   str?: string;
-  dir?: string;
-  width?: number;
-  height?: number;
-  transform?: number[];
-  fontName?: string;
-  hasEOL?: boolean;
 }
 
 interface TextMarkedContent {
   type: 'beginMarkedContent' | 'endMarkedContent';
-  tag?: string;
   items?: Array<TextItem | TextMarkedContent>;
 }
-
-// Extend Canvas types for Node canvas
-interface NodeCanvas {
-  toBuffer(format: 'image/jpeg', options?: { quality?: number }): Buffer;
-}
-
-if (!process.env.OPENROUTER_API_KEY) {
-  console.error("[Startup] OPENROUTER_API_KEY is not set!");
-}
-
-const openrouter = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_API_KEY || "",
-  defaultHeaders: {
-    "HTTP-Referer": process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000",
-    "X-Title": "JhalmuriCV",
-  },
-});
-
-const TEXT_MODEL = "nvidia/nemotron-3-super-120b-a12b:free";
-const TEXT_FALLBACKS = [
-  "meta-llama/llama-3.3-70b-instruct:free",
-  "openai/gpt-oss-120b:free",
-];
-const VISION_MODEL = "nvidia/nemotron-nano-12b-v2-vl:free";
-const MAX_VISION_PAGES = 2;
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -92,7 +51,6 @@ function extractTextFromItems(items: Array<TextItem | TextMarkedContent>): strin
     if ('str' in item && item.str !== undefined) {
       textParts.push(item.str);
     } else if ('type' in item && item.type === 'beginMarkedContent' && item.items) {
-      // Recursively extract text from marked content groups
       textParts.push(extractTextFromItems(item.items));
     }
   }
@@ -100,83 +58,11 @@ function extractTextFromItems(items: Array<TextItem | TextMarkedContent>): strin
   return textParts.join(' ');
 }
 
-async function convertPdfToImages(buffer: Buffer): Promise<string[]> {
-  const base64Images: string[] = [];
-
-  try {
-    // Dynamically import pdfjs-dist legacy build for Node.js
-    const pdfjsLib = await import("pdfjs-dist/legacy/build/pdf.mjs") as unknown as PdfjsLib;
-    pdfjsLib.GlobalWorkerOptions.workerSrc = false;
-
-    // Dynamically import canvas package
-    const canvasModule = await import("canvas");
-    const { createCanvas } = canvasModule;
-
-    // Create a canvas factory for pdfjs-dist
-    const canvasFactory: CanvasFactory = {
-      create(width: number, height: number) {
-        const canvas = createCanvas(width, height);
-        const context = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
-        return { canvas: canvas as unknown as HTMLCanvasElement, context };
-      },
-      destroy(canvasAndContext: { canvas: HTMLCanvasElement; context: CanvasRenderingContext2D }) {
-        // Canvas cleanup if needed
-        canvasAndContext.canvas.width = 0;
-        canvasAndContext.canvas.height = 0;
-      }
-    };
-
-    const loadingTask = pdfjsLib.getDocument({
-      data: new Uint8Array(buffer),
-      useWorkerFetch: false,
-      isEvalSupported: false,
-      useSystemFonts: true,
-      disableWorker: true,
-      canvasFactory,
-    });
-
-    const pdf = await loadingTask.promise;
-    const pagesToProcess = Math.min(pdf.numPages, MAX_VISION_PAGES);
-
-    for (let pageNum = 1; pageNum <= pagesToProcess; pageNum++) {
-      const page = await pdf.getPage(pageNum);
-      const viewport = page.getViewport({ scale: 1.5 });
-
-      // Create canvas using the factory
-      const canvasAndContext = canvasFactory.create(viewport.width, viewport.height);
-
-      await page.render({
-        canvasContext: canvasAndContext.context,
-        viewport: viewport,
-      }).promise;
-
-      // Export as JPEG base64 using node-canvas API
-      const nodeCanvas = canvasAndContext.canvas as unknown as NodeCanvas;
-      const jpegBuffer = nodeCanvas.toBuffer('image/jpeg', { quality: 0.85 });
-      const base64String = jpegBuffer.toString('base64');
-      base64Images.push(base64String);
-
-      // Clean up
-      canvasFactory.destroy(canvasAndContext);
-    }
-
-    // Clean up PDF document
-    if (pdf.destroy) {
-      pdf.destroy();
-    }
-
-    console.log(`[PDF to Image] Converted ${base64Images.length} pages to JPEG`);
-    return base64Images;
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    console.error("[PDF to Image] Conversion failed:", msg);
-    throw new Error("PDF to image conversion failed: " + msg);
-  }
-}
-
 async function parsePDFWithPdfjs(buffer: Buffer): Promise<{ text: string }> {
   try {
     const pdfjsLib = await import("pdfjs-dist") as unknown as PdfjsLib;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = false;
+
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(buffer),
       useWorkerFetch: false,
@@ -191,8 +77,6 @@ async function parsePDFWithPdfjs(buffer: Buffer): Promise<{ text: string }> {
     for (let i = 1; i <= pagesToProcess; i++) {
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
-
-      // Use aggressive text extraction that handles all item types
       const pageText = extractTextFromItems(textContent.items);
       fullText += pageText + "\n";
     }
@@ -255,16 +139,16 @@ async function parsePDFWithRegex(buffer: Buffer): Promise<{ text: string }> {
 async function parsePDF(buffer: Buffer): Promise<{ text: string; needsVision: boolean }> {
   try {
     const result = await parsePDFWithPdfjs(buffer);
-    if (result.text.length >= 100) return { text: result.text, needsVision: false };
-    console.log("[PDF Parse] pdfjs returned insufficient text, trying regex...");
+    if (result.text.length >= 50) return { text: result.text, needsVision: false };
+    console.log("[PDF Parse] pdfjs returned insufficient text (<50 chars), trying regex...");
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.log("[PDF Parse] pdfjs failed:", msg);
   }
   try {
     const result = await parsePDFWithRegex(buffer);
-    if (result.text.length >= 100) return { text: result.text, needsVision: false };
-    console.log("[PDF Parse] regex returned insufficient text, falling back to vision");
+    if (result.text.length >= 50) return { text: result.text, needsVision: false };
+    console.log("[PDF Parse] regex returned insufficient text (<50 chars), falling back to vision");
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.log("[PDF Parse] regex failed:", msg);
@@ -272,14 +156,16 @@ async function parsePDF(buffer: Buffer): Promise<{ text: string; needsVision: bo
   return { text: "", needsVision: true };
 }
 
-function isOverloadedError(error: unknown): boolean {
+function isRateLimitError(error: unknown): boolean {
   if (error instanceof Error) {
     const message = error.message.toLowerCase();
     return (
-      message.includes("503") || message.includes("429") ||
-      message.includes("overloaded") || message.includes("rate limit") ||
-      message.includes("too many requests") || message.includes("resource exhausted") ||
-      message.includes("try again later") || message.includes("max retries")
+      message.includes("429") ||
+      message.includes("503") ||
+      message.includes("quota") ||
+      message.includes("rate limit") ||
+      message.includes("too many requests") ||
+      message.includes("resource exhausted")
     );
   }
   return false;
@@ -293,99 +179,88 @@ function logErrorDetails(context: string, error: unknown): void {
   }
 }
 
-async function callOpenRouterVisionMode(
+/**
+ * Multi-key fallback logic for Gemini API calls
+ * Iterates through GEMINI_API_KEY_1, GEMINI_API_KEY_2, GEMINI_API_KEY_3
+ * Retries on 429/503/quota errors with 1000ms delay between keys
+ */
+async function callGeminiWithMultiKeyFallback(
   prompt: string,
-  base64Images: string[],
-  maxRetries = 3
+  isVisionMode: boolean = false,
+  pdfBase64?: string
 ): Promise<string> {
-  const delays = [1000, 2000, 4000];
+  // Collect available API keys
+  const apiKeys = [
+    process.env.GEMINI_API_KEY_1,
+    process.env.GEMINI_API_KEY_2,
+    process.env.GEMINI_API_KEY_3,
+  ].filter(Boolean) as string[];
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+  if (apiKeys.length === 0) {
+    throw new Error("No Gemini API keys configured");
+  }
+
+  console.log(`[Gemini] Starting multi-key fallback with ${apiKeys.length} key(s)`);
+
+  for (let i = 0; i < apiKeys.length; i++) {
+    const apiKey = apiKeys[i];
+    const keySuffix = apiKey.slice(-4);
+
     try {
-      // Build content array with text and images
-      const content: OpenAI.Chat.ChatCompletionContentPart[] = [
-        { type: "text", text: prompt },
-      ];
+      console.log(`[Gemini] Attempt ${i + 1}/${apiKeys.length} with key ending in ...${keySuffix}`);
 
-      // Add each image as a separate image_url content part
-      for (const base64Image of base64Images) {
-        content.push({
-          type: "image_url",
-          image_url: {
-            url: `data:image/jpeg;base64,${base64Image}`,
+      // Create a NEW client for each key attempt
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+
+      let result;
+
+      if (isVisionMode && pdfBase64) {
+        // Vision mode: pass PDF as inline data
+        result = await model.generateContent([
+          prompt,
+          {
+            inlineData: {
+              data: pdfBase64,
+              mimeType: "application/pdf",
+            },
           },
-        });
+        ]);
+      } else {
+        // Text mode: standard prompt
+        result = await model.generateContent(prompt);
       }
 
-      const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [
-        { role: "user", content },
-      ];
+      const response = await result.response;
+      const text = response.text();
 
-      console.log(`[OpenRouter Vision] Model: ${VISION_MODEL}, attempt: ${attempt + 1}, images: ${base64Images.length}`);
+      if (!text || text.trim().length === 0) {
+        throw new Error("Empty response from Gemini");
+      }
 
-      const completion = await openrouter.chat.completions.create({
-        model: VISION_MODEL,
-        messages,
-        max_tokens: 8192,
-        temperature: 0.7,
-      });
-
-      const responseText = completion.choices[0]?.message?.content || "";
-      if (!responseText) throw new Error("Empty response from OpenRouter");
-
-      console.log(`[OpenRouter Vision] Response length: ${responseText.length}`);
-      return responseText;
+      console.log(`[Gemini] Success with key ending in ...${keySuffix}. Response length: ${text.length}`);
+      return text;
     } catch (error) {
-      logErrorDetails(`OpenRouter Vision attempt ${attempt + 1}`, error);
-      if (attempt < maxRetries && isOverloadedError(error)) {
-        const delay = delays[attempt] || 4000;
-        console.log(`[OpenRouter Vision] Retrying after ${delay}ms...`);
-        await sleep(delay);
+      logErrorDetails(`Gemini attempt ${i + 1}`, error);
+
+      if (isRateLimitError(error)) {
+        console.warn(`[Gemini] Key ending in ...${keySuffix} hit rate limit/quota`);
+
+        // Wait 1000ms before trying next key (if there are more keys)
+        if (i < apiKeys.length - 1) {
+          console.log(`[Gemini] Waiting 1000ms before trying next key...`);
+          await sleep(1000);
+        }
         continue;
+      } else {
+        // Non-rate-limit error - don't retry with other keys
+        throw error;
       }
-      throw error;
     }
   }
-  throw new Error("503 Service Unavailable: Max retries exceeded");
-}
 
-async function callOpenRouterWithRetry(
-  prompt: string,
-  model: string,
-  maxRetries = 3
-): Promise<string> {
-  const delays = [1000, 2000, 4000];
-
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      const messages: OpenAI.Chat.ChatCompletionMessageParam[] = [{ role: "user", content: prompt }];
-
-      console.log(`[OpenRouter] Model: ${model}, attempt: ${attempt + 1}, mode: text`);
-
-      const completion = await openrouter.chat.completions.create({
-        model,
-        messages,
-        max_tokens: 8192,
-        temperature: 0.7,
-      });
-
-      const responseText = completion.choices[0]?.message?.content || "";
-      if (!responseText) throw new Error("Empty response from OpenRouter");
-
-      console.log(`[OpenRouter] Response length: ${responseText.length}`);
-      return responseText;
-    } catch (error) {
-      logErrorDetails(`OpenRouter attempt ${attempt + 1}`, error);
-      if (attempt < maxRetries && isOverloadedError(error)) {
-        const delay = delays[attempt] || 4000;
-        console.log(`[OpenRouter] Retrying after ${delay}ms...`);
-        await sleep(delay);
-        continue;
-      }
-      throw error;
-    }
-  }
-  throw new Error("503 Service Unavailable: Max retries exceeded");
+  // All keys exhausted
+  throw new Error("All Gemini API keys failed due to rate limits or quotas");
 }
 
 function looksLikeResume(text: string): boolean {
@@ -415,9 +290,10 @@ const invalidDocumentMessages = [
 
 export async function POST(request: NextRequest) {
   try {
-    if (!process.env.OPENROUTER_API_KEY) {
+    // Check for primary API key - throw 500 if missing
+    if (!process.env.GEMINI_API_KEY_1) {
       return NextResponse.json(
-        { error: "Bhai, server ka API key missing hai 😭 Admin se baat kar, ya Demo try karo!" },
+        { error: "Bhai, server ka Gemini API key missing hai 😭 Admin se baat kar!" },
         { status: 500 }
       );
     }
@@ -431,9 +307,11 @@ export async function POST(request: NextRequest) {
     if (!file) {
       return NextResponse.json({ error: "No file provided" }, { status: 400 });
     }
+
     if (file.type !== "application/pdf" && !file.name.toLowerCase().endsWith(".pdf")) {
       return NextResponse.json({ error: "Only PDF files are accepted" }, { status: 400 });
     }
+
     const maxSize = 5 * 1024 * 1024;
     if (file.size > maxSize) {
       return NextResponse.json({ error: "File size exceeds 5MB limit" }, { status: 400 });
@@ -445,6 +323,7 @@ export async function POST(request: NextRequest) {
     } catch {
       return NextResponse.json({ error: "Failed to read file. The file may be corrupted." }, { status: 400 });
     }
+
     const buffer = Buffer.from(bytes);
 
     // Try text extraction first
@@ -460,7 +339,7 @@ export async function POST(request: NextRequest) {
     }
 
     if (!useVisionMode && (!pdfText || pdfText.trim().length < 50)) {
-      console.log("[PDF Parse] Text too short, switching to vision mode");
+      console.log("[PDF Parse] Text too short (<50 chars), switching to vision mode");
       useVisionMode = true;
     }
 
@@ -470,77 +349,54 @@ export async function POST(request: NextRequest) {
 
     let result: string | undefined;
 
+    // VISION MODE: PDF as base64 inline data
     if (useVisionMode) {
-      let base64Images: string[] = [];
-      let conversionFailed = false;
+      // Convert PDF buffer to base64, trim to 4MB max
+      let pdfBase64 = buffer.toString("base64");
+      const maxBase64Size = 4 * 1024 * 1024; // 4MB
 
-      try {
-        // Convert PDF to JPEG images
-        base64Images = await convertPdfToImages(buffer);
-        console.log(`[Vision] Converted PDF to ${base64Images.length} JPEG images`);
-      } catch (conversionError) {
-        logErrorDetails("PDF to Image conversion", conversionError);
-        conversionFailed = true;
+      if (pdfBase64.length > maxBase64Size) {
+        console.log(`[Vision] PDF base64 too large (${pdfBase64.length} chars), truncating to 4MB`);
+        pdfBase64 = pdfBase64.substring(0, maxBase64Size);
       }
 
-      // Graceful degradation: if conversion failed but we have some text, fall back to text mode
-      if (conversionFailed || base64Images.length === 0) {
-        if (pdfText && pdfText.trim().length > 10) {
-          console.log("[Vision] Conversion failed, falling back to text mode with partial text");
+      const visionPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT;
+
+      try {
+        result = await callGeminiWithMultiKeyFallback(visionPrompt, true, pdfBase64);
+      } catch (visionError) {
+        logErrorDetails("Vision mode failed", visionError);
+
+        // Check if we should fall back to text mode
+        const msg = visionError instanceof Error ? visionError.message.toLowerCase() : "";
+        const isUnsupportedError =
+          msg.includes("400") ||
+          msg.includes("422") ||
+          msg.includes("unsupported") ||
+          msg.includes("invalid") ||
+          msg.includes("image") ||
+          msg.includes("multimodal") ||
+          msg.includes("mime type");
+
+        if (isUnsupportedError) {
+          console.log("[Vision] Model rejected PDF input, falling back to text mode");
           useVisionMode = false;
-        } else {
+        }
+
+        // If we have some text, try text mode as fallback
+        if (!useVisionMode && pdfText && pdfText.trim().length > 10) {
+          console.log("[Vision] Falling back to text mode with extracted text");
+        } else if (!useVisionMode) {
+          // No text and vision failed - return error
           return NextResponse.json(
             { error: "Bhai, PDF process nahi ho raha 😵 Ek alag readable PDF try kar!" },
             { status: 400 }
           );
         }
       }
-
-      if (useVisionMode) {
-        const visionPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT;
-
-        const maxAttempts = 3;
-        let visionSucceeded = false;
-
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
-          try {
-            result = await callOpenRouterVisionMode(visionPrompt, base64Images);
-            visionSucceeded = true;
-            break;
-          } catch (visionError) {
-            logErrorDetails(`Vision attempt ${attempt + 1}`, visionError);
-            const msg = visionError instanceof Error ? visionError.message.toLowerCase() : "";
-
-            // If vision model rejects the image format, fall back to text mode
-            if (msg.includes("400") || msg.includes("422") || msg.includes("unsupported") ||
-                msg.includes("invalid") || msg.includes("image") || msg.includes("multimodal")) {
-              console.log("[Vision] Model rejected images, falling back to text mode");
-              useVisionMode = false;
-              break;
-            }
-
-            if (isOverloadedError(visionError) && attempt < maxAttempts - 1) {
-              await sleep(2000 * (attempt + 1));
-              continue;
-            }
-            throw visionError;
-          }
-        }
-
-        // If vision failed and we have no text, this PDF can't be processed
-        if (!visionSucceeded && !useVisionMode) {
-          if (!pdfText || pdfText.trim().length < 10) {
-            return NextResponse.json(
-              { error: "Bhai, PDF process nahi ho raha 😵 Ek alag readable PDF try kar!" },
-              { status: 400 }
-            );
-          }
-          // Fall through to text mode with whatever text we have
-        }
-      }
     }
 
-    // Text mode (original path or vision fallback)
+    // TEXT MODE: Use extracted text with multi-key fallback
     if (!useVisionMode && !result) {
       if (!pdfText || pdfText.trim().length < 10) {
         return NextResponse.json(
@@ -559,26 +415,12 @@ export async function POST(request: NextRequest) {
 
       const truncatedText = pdfText.slice(0, 15000);
       const textPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + ANALYSIS_PROMPT(truncatedText);
-      const textModels = [TEXT_MODEL, ...TEXT_FALLBACKS];
 
-      for (const m of textModels) {
-        try {
-          console.log(`[Text] Trying model: ${m}`);
-          result = await callOpenRouterWithRetry(textPrompt, m);
-          console.log(`[Text] Model ${m} succeeded`);
-          break;
-        } catch (err) {
-          logErrorDetails(`Text model ${m}`, err);
-          const msg = err instanceof Error ? err.message.toLowerCase() : "";
-          const isOverload = msg.includes("503") || msg.includes("429") ||
-            msg.includes("overloaded") || msg.includes("rate limit");
-          if (isOverload && m !== textModels[textModels.length - 1]) {
-            console.log(`[Text] ${m} overloaded, trying next...`);
-            await sleep(1500);
-            continue;
-          }
-          throw err;
-        }
+      try {
+        result = await callGeminiWithMultiKeyFallback(textPrompt);
+      } catch (textError) {
+        logErrorDetails("Text mode failed", textError);
+        throw textError;
       }
     }
 
@@ -586,15 +428,23 @@ export async function POST(request: NextRequest) {
       throw new Error("Failed to get response after all attempts");
     }
 
-    // Parse the response
+    // Parse and sanitize the JSON response
     try {
       let cleanedText = result.trim();
-      if (cleanedText.startsWith("```json")) cleanedText = cleanedText.slice(7);
-      else if (cleanedText.startsWith("```")) cleanedText = cleanedText.slice(3);
-      if (cleanedText.endsWith("```")) cleanedText = cleanedText.slice(0, -3);
+
+      // Strip markdown code blocks
+      if (cleanedText.startsWith("```json")) {
+        cleanedText = cleanedText.slice(7);
+      } else if (cleanedText.startsWith("```")) {
+        cleanedText = cleanedText.slice(3);
+      }
+      if (cleanedText.endsWith("```")) {
+        cleanedText = cleanedText.slice(0, -3);
+      }
       cleanedText = cleanedText.trim();
 
       let analysis;
+
       try {
         analysis = JSON.parse(cleanedText);
       } catch {
@@ -604,14 +454,20 @@ export async function POST(request: NextRequest) {
         // Try simplified retry for vision mode
         if (useVisionMode) {
           try {
-            // Re-convert PDF to images for retry
-            const base64Images = await convertPdfToImages(buffer);
+            let pdfBase64 = buffer.toString("base64");
+            const maxBase64Size = 4 * 1024 * 1024;
+            if (pdfBase64.length > maxBase64Size) {
+              pdfBase64 = pdfBase64.substring(0, maxBase64Size);
+            }
+
             const retryPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT + "\n\n" + SIMPLIFIED_JSON_PROMPT;
-            const retryText = await callOpenRouterVisionMode(retryPrompt, base64Images);
-            let retryCleaned = retryText;
+            const retryText = await callGeminiWithMultiKeyFallback(retryPrompt, true, pdfBase64);
+
+            let retryCleaned = retryText.trim();
             if (retryCleaned.startsWith("```json")) retryCleaned = retryCleaned.slice(7);
             else if (retryCleaned.startsWith("```")) retryCleaned = retryCleaned.slice(3);
             if (retryCleaned.endsWith("```")) retryCleaned = retryCleaned.slice(0, -3);
+
             analysis = JSON.parse(retryCleaned.trim());
             console.log("[Parse] Simplified retry succeeded");
           } catch (retryError) {
@@ -620,7 +476,7 @@ export async function POST(request: NextRequest) {
         }
 
         if (!analysis) {
-          // Try to extract JSON from response
+          // Try to extract JSON from response using regex
           const jsonMatches = cleanedText.match(/\{[\s\S]*\}/g);
           if (jsonMatches) {
             for (let i = jsonMatches.length - 1; i >= 0; i--) {
@@ -651,23 +507,27 @@ export async function POST(request: NextRequest) {
       if (typeof analysis.overallScore === "number" && analysis.overallScore >= 0) {
         return NextResponse.json(analysis);
       }
+
       if (!analysis.roastHeadline || !analysis.roastQuote) {
         return NextResponse.json({ error: "Invalid analysis response structure" }, { status: 500 });
       }
-      return NextResponse.json(analysis);
 
+      return NextResponse.json(analysis);
     } catch (parseError) {
       console.error("[Parse] Fatal error:", parseError);
       return NextResponse.json({ error: "Analysis failed. Please try again later." }, { status: 500 });
     }
-
   } catch (error) {
     logErrorDetails("POST Handler", error);
     const errorMessage = error instanceof Error ? error.message.toLowerCase() : "";
 
-    if (errorMessage.includes("503") || errorMessage.includes("429") ||
-        errorMessage.includes("overloaded") || errorMessage.includes("rate limit") ||
-        errorMessage.includes("max retries")) {
+    if (
+      errorMessage.includes("503") ||
+      errorMessage.includes("429") ||
+      errorMessage.includes("quota") ||
+      errorMessage.includes("rate limit") ||
+      errorMessage.includes("all gemini api keys failed")
+    ) {
       return NextResponse.json(
         { error: "API busy hai abhi 😤 Thoda wait karo aur retry karo, ya Demo mode try karo", retryAfter: 5 },
         { status: 503 }
