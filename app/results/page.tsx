@@ -72,10 +72,16 @@ export default function ResultsPage() {
     try {
       const stored = localStorage.getItem('resumeAnalysis');
       if (stored) {
-        const parsed = JSON.parse(stored);
-        return (parsed.overallScore ?? 50) / 100;
+        try {
+          const parsed = JSON.parse(stored);
+          return (parsed.overallScore ?? 50) / 100;
+        } catch {
+          return 0.5;
+        }
       }
-    } catch {}
+    } catch {
+      return 0.5;
+    }
     return 0.5;
   });
 

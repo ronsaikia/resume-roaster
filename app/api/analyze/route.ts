@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { SYSTEM_PROMPT, ANALYSIS_PROMPT, VISION_ANALYSIS_PROMPT, SIMPLIFIED_JSON_PROMPT } from "@/lib/analyzePrompt";
+import crypto from "crypto";
 
 interface PdfjsLib {
   GlobalWorkerOptions: { workerSrc: string | false };
@@ -40,6 +41,26 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// In-memory request deduplication cache
+interface CachedResult {
+  result: string;
+  timestamp: number;
+}
+const requestCache = new Map<string, CachedResult>();
+const CACHE_TTL_MS = 60000; // 60 seconds
+
+// Clean old cache entries periodically
+function cleanOldCacheEntries(): void {
+  const now = Date.now();
+  const keysToDelete: string[] = [];
+  requestCache.forEach((value, key) => {
+    if (now - value.timestamp > CACHE_TTL_MS) {
+      keysToDelete.push(key);
+    }
+  });
+  keysToDelete.forEach(key => requestCache.delete(key));
+}
 
 /**
  * Extract text from text content items recursively (handles marked content)
@@ -180,14 +201,16 @@ function logErrorDetails(context: string, error: unknown): void {
 }
 
 /**
- * Multi-key fallback logic for Gemini API calls
- * Iterates through GEMINI_API_KEY_1, GEMINI_API_KEY_2, GEMINI_API_KEY_3
- * Retries on 429/503/quota errors with 1000ms delay between keys
+ * Multi-key fallback logic for Gemini API calls with exponential backoff
+ * Each key gets MAX 2 retries with backoff (500ms, 1000ms) before moving to next key
+ * Only retries on rate-limit/quota errors (429, 503, resource exhausted)
+ * Non-rate-limit errors fail fast
  */
 async function callGeminiWithMultiKeyFallback(
   prompt: string,
   isVisionMode: boolean = false,
-  pdfBase64?: string
+  pdfBase64?: string,
+  targetRole?: string | null
 ): Promise<string> {
   // Collect available API keys
   const apiKeys = [
@@ -200,61 +223,75 @@ async function callGeminiWithMultiKeyFallback(
     throw new Error("No Gemini API keys configured");
   }
 
-  console.log(`[Gemini] Starting multi-key fallback with ${apiKeys.length} key(s)`);
+  console.log(`[Gemini] Starting multi-key fallback with ${apiKeys.length} key(s), targetRole: ${targetRole || 'none'}`);
 
-  for (let i = 0; i < apiKeys.length; i++) {
-    const apiKey = apiKeys[i];
+  const MAX_RETRIES_PER_KEY = 2;
+  const RETRY_DELAYS = [500, 1000]; // Exponential backoff delays in ms
+
+  for (let keyIndex = 0; keyIndex < apiKeys.length; keyIndex++) {
+    const apiKey = apiKeys[keyIndex];
     const keySuffix = apiKey.slice(-4);
 
-    try {
-      console.log(`[Gemini] Attempt ${i + 1}/${apiKeys.length} with key ending in ...${keySuffix}`);
+    for (let attempt = 0; attempt <= MAX_RETRIES_PER_KEY; attempt++) {
+      try {
+        console.log(`[Gemini] Key ${keyIndex + 1}/${apiKeys.length} (ending ...${keySuffix}) - Attempt ${attempt + 1}/${MAX_RETRIES_PER_KEY + 1}`);
 
-      // Create a NEW client for each key attempt
-      const genAI = new GoogleGenerativeAI(apiKey);
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+        // Create a NEW client for each attempt
+        const genAI = new GoogleGenerativeAI(apiKey);
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-      let result;
+        let result;
 
-      if (isVisionMode && pdfBase64) {
-        // Vision mode: pass PDF as inline data
-        result = await model.generateContent([
-          prompt,
-          {
-            inlineData: {
-              data: pdfBase64,
-              mimeType: "application/pdf",
+        if (isVisionMode && pdfBase64) {
+          // Vision mode: pass PDF as inline data
+          result = await model.generateContent([
+            prompt,
+            {
+              inlineData: {
+                data: pdfBase64,
+                mimeType: "application/pdf",
+              },
             },
-          },
-        ]);
-      } else {
-        // Text mode: standard prompt
-        result = await model.generateContent(prompt);
-      }
-
-      const response = await result.response;
-      const text = response.text();
-
-      if (!text || text.trim().length === 0) {
-        throw new Error("Empty response from Gemini");
-      }
-
-      console.log(`[Gemini] Success with key ending in ...${keySuffix}. Response length: ${text.length}`);
-      return text;
-    } catch (error) {
-      logErrorDetails(`Gemini attempt ${i + 1}`, error);
-
-      if (isRateLimitError(error)) {
-        console.warn(`[Gemini] Key ending in ...${keySuffix} hit rate limit/quota`);
-
-        // Wait 1000ms before trying next key (if there are more keys)
-        if (i < apiKeys.length - 1) {
-          console.log(`[Gemini] Waiting 1000ms before trying next key...`);
-          await sleep(1000);
+          ]);
+        } else {
+          // Text mode: standard prompt
+          result = await model.generateContent(prompt);
         }
-        continue;
-      } else {
-        // Non-rate-limit error - don't retry with other keys
-        throw error;
+
+        const response = result.response;
+        const text = response.text();
+
+        if (!text || text.trim().length === 0) {
+          throw new Error("Empty response from Gemini");
+        }
+
+        console.log(`[Gemini] Success with key ...${keySuffix} on attempt ${attempt + 1}. Response length: ${text.length}`);
+        return text;
+      } catch (error) {
+        logErrorDetails(`Gemini key ${keyIndex + 1} attempt ${attempt + 1}`, error);
+
+        if (isRateLimitError(error)) {
+          console.warn(`[Gemini] Key ...${keySuffix} hit rate limit/quota on attempt ${attempt + 1}`);
+
+          // If we have more retries for this key, wait and retry
+          if (attempt < MAX_RETRIES_PER_KEY) {
+            const delay = RETRY_DELAYS[attempt];
+            console.log(`[Gemini] Waiting ${delay}ms before retry ${attempt + 2}...`);
+            await sleep(delay);
+            continue;
+          }
+
+          // Exhausted retries for this key, move to next key if available
+          if (keyIndex < apiKeys.length - 1) {
+            console.log(`[Gemini] Exhausted retries for key ...${keySuffix}, moving to next key...`);
+            await sleep(500); // Small delay before trying next key
+          }
+          break; // Move to next key
+        } else {
+          // Non-rate-limit error - fail fast, don't retry with other keys
+          console.error(`[Gemini] Non-retryable error with key ...${keySuffix}:`, error instanceof Error ? error.message : error);
+          throw error;
+        }
       }
     }
   }
@@ -290,6 +327,9 @@ const invalidDocumentMessages = [
 
 export async function POST(request: NextRequest) {
   try {
+    // Clean old cache entries periodically
+    cleanOldCacheEntries();
+
     // Check for primary API key - throw 500 if missing
     if (!process.env.GEMINI_API_KEY_1) {
       return NextResponse.json(
@@ -326,6 +366,17 @@ export async function POST(request: NextRequest) {
 
     const buffer = Buffer.from(bytes);
 
+    // Generate file hash for deduplication
+    const fileHash = crypto.createHash("sha256").update(buffer).digest("hex");
+    const cacheKey = `${fileHash}-${targetRole || "general"}`;
+
+    // Check cache for recent duplicate request
+    const cached = requestCache.get(cacheKey);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
+      console.log(`[Cache] Returning cached result for file hash ${fileHash.slice(0, 8)}...`);
+      return NextResponse.json(JSON.parse(cached.result));
+    }
+
     // Try text extraction first
     let pdfText = "";
     let useVisionMode = false;
@@ -343,10 +394,6 @@ export async function POST(request: NextRequest) {
       useVisionMode = true;
     }
 
-    const rolePrefix = targetRole && targetRole !== "General / Fresher"
-      ? `TARGET ROLE: ${targetRole} - Evaluate the resume specifically for this role.\n\n`
-      : "";
-
     let result: string | undefined;
 
     // VISION MODE: PDF as base64 inline data
@@ -360,10 +407,10 @@ export async function POST(request: NextRequest) {
         pdfBase64 = pdfBase64.substring(0, maxBase64Size);
       }
 
-      const visionPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT;
+      const visionPrompt = SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT(targetRole);
 
       try {
-        result = await callGeminiWithMultiKeyFallback(visionPrompt, true, pdfBase64);
+        result = await callGeminiWithMultiKeyFallback(visionPrompt, true, pdfBase64, targetRole);
       } catch (visionError) {
         logErrorDetails("Vision mode failed", visionError);
 
@@ -385,7 +432,7 @@ export async function POST(request: NextRequest) {
 
         // If we have some text, try text mode as fallback
         if (!useVisionMode && pdfText && pdfText.trim().length > 10) {
-          console.log("[Vision] Falling back to text mode with extracted text");
+          console.log("[Vision] Falling back to text mode with extracted text (pdfText.length=" + pdfText.length + ")");
         } else if (!useVisionMode) {
           // No text and vision failed - return error
           return NextResponse.json(
@@ -413,11 +460,10 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const truncatedText = pdfText.slice(0, 15000);
-      const textPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + ANALYSIS_PROMPT(truncatedText);
+      const textPrompt = SYSTEM_PROMPT + "\n\n" + ANALYSIS_PROMPT(pdfText, targetRole);
 
       try {
-        result = await callGeminiWithMultiKeyFallback(textPrompt);
+        result = await callGeminiWithMultiKeyFallback(textPrompt, false, undefined, targetRole);
       } catch (textError) {
         logErrorDetails("Text mode failed", textError);
         throw textError;
@@ -460,8 +506,8 @@ export async function POST(request: NextRequest) {
               pdfBase64 = pdfBase64.substring(0, maxBase64Size);
             }
 
-            const retryPrompt = rolePrefix + SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT + "\n\n" + SIMPLIFIED_JSON_PROMPT;
-            const retryText = await callGeminiWithMultiKeyFallback(retryPrompt, true, pdfBase64);
+            const retryPrompt = SYSTEM_PROMPT + "\n\n" + VISION_ANALYSIS_PROMPT(targetRole) + "\n\n" + SIMPLIFIED_JSON_PROMPT;
+            const retryText = await callGeminiWithMultiKeyFallback(retryPrompt, true, pdfBase64, targetRole);
 
             let retryCleaned = retryText.trim();
             if (retryCleaned.startsWith("```json")) retryCleaned = retryCleaned.slice(7);
@@ -505,6 +551,8 @@ export async function POST(request: NextRequest) {
       }
 
       if (typeof analysis.overallScore === "number" && analysis.overallScore >= 0) {
+        // Cache the successful result
+        requestCache.set(cacheKey, { result: JSON.stringify(analysis), timestamp: Date.now() });
         return NextResponse.json(analysis);
       }
 
@@ -512,6 +560,8 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: "Invalid analysis response structure" }, { status: 500 });
       }
 
+      // Cache the successful result
+      requestCache.set(cacheKey, { result: JSON.stringify(analysis), timestamp: Date.now() });
       return NextResponse.json(analysis);
     } catch (parseError) {
       console.error("[Parse] Fatal error:", parseError);
@@ -529,7 +579,7 @@ export async function POST(request: NextRequest) {
       errorMessage.includes("all gemini api keys failed")
     ) {
       return NextResponse.json(
-        { error: "API busy hai abhi 😤 Thoda wait karo aur retry karo, ya Demo mode try karo", retryAfter: 5 },
+        { error: "API busy hai abhi 😤 Thoda wait karo aur retry karo, ya Demo mode try kar", retryAfter: 5 },
         { status: 503 }
       );
     }

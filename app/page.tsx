@@ -463,9 +463,9 @@ export default function Home() {
         } else if (msg.includes("503") || msg.includes("429") || msg.includes("overloaded") || msg.includes("rate limit") || msg.includes("max retries")) {
           userMessage = "Yaar API ke tokens khatam ho gaye 😭 Demo try karo — warna thodi der baad dubara try karo!";
         } else if (msg.includes("timeout") || msg.includes("abort") || msg.includes("signal") || msg.includes("aborted")) {
-          userMessage = "Bhai itna bada PDF? Server so gaya. Chota PDF upload kar ya Demo try kar";
+          userMessage = "Bhai itna bada PDF? Server so gaya. Chota PDF upload kar ya Demo try kar.";
         } else if (msg.includes("network") || msg.includes("fetch") || msg.includes("failed")) {
-          userMessage = "Internet slow hai ya server gone for chai break ☕ Dubara try kar";
+          userMessage = "Internet slow hai ya server gone for chai break ☕ Dubara try kar.";
         } else if (msg.includes("json") || msg.includes("parse")) {
           userMessage = "We had trouble reading the response. Please try again.";
         } else if (originalMsg && originalMsg !== "Failed to analyze resume") {
@@ -487,65 +487,76 @@ export default function Home() {
   const handleDemo = async () => {
     setIsLoading(true);
 
-    // Randomize overallScore between 45 and 82
-    const randomOverallScore = Math.floor(Math.random() * (82 - 45 + 1)) + 45;
+    // Safety timeout: force clear loading state if navigation fails (12 seconds)
+    const safetyTimeout = setTimeout(() => {
+      console.log("[handleDemo] Safety timeout triggered - forcing loading state reset");
+      setIsLoading(false);
+    }, 12000);
 
-    // Calculate scaling factor based on original score of 73
-    const scaleFactor = randomOverallScore / 73;
+    try {
+      // Randomize overallScore between 45 and 82
+      const randomOverallScore = Math.floor(Math.random() * (82 - 45 + 1)) + 45;
 
-    // Scale category scores proportionally while keeping within bounds
-    const scaleScore = (originalScore: number, maxScore: number) => {
-      const scaled = Math.round(originalScore * scaleFactor);
-      return Math.min(scaled, maxScore);
-    };
+      // Calculate scaling factor based on original score of 73
+      const scaleFactor = randomOverallScore / 73;
 
-    const randomizedDemo = {
-      ...demoAnalysis,
-      overallScore: randomOverallScore,
-      roastHeadline: demoRoastHeadlines[Math.floor(Math.random() * demoRoastHeadlines.length)],
-      roastQuote: demoRoastQuotes[Math.floor(Math.random() * demoRoastQuotes.length)],
-      categories: {
-        structureCompleteness: {
-          ...demoAnalysis.categories.structureCompleteness,
-          score: scaleScore(demoAnalysis.categories.structureCompleteness.score, 20),
-        },
-        contentQuality: {
-          ...demoAnalysis.categories.contentQuality,
-          score: scaleScore(demoAnalysis.categories.contentQuality.score, 20),
-        },
-        impactMetrics: {
-          ...demoAnalysis.categories.impactMetrics,
-          score: scaleScore(demoAnalysis.categories.impactMetrics.score, 15),
-        },
-        languageWriting: {
-          ...demoAnalysis.categories.languageWriting,
-          score: scaleScore(demoAnalysis.categories.languageWriting.score, 10),
-        },
-        formattingReadability: {
-          ...demoAnalysis.categories.formattingReadability,
-          score: scaleScore(demoAnalysis.categories.formattingReadability.score, 15),
-        },
-        atsCompatibility: {
-          ...demoAnalysis.categories.atsCompatibility,
-          score: scaleScore(demoAnalysis.categories.atsCompatibility.score, 10),
-        },
-        skillsRelevance: {
-          ...demoAnalysis.categories.skillsRelevance,
-          score: scaleScore(demoAnalysis.categories.skillsRelevance.score, 10),
-        },
-      },
-    };
+      // Scale category scores proportionally while keeping within bounds
+      const scaleScore = (originalScore: number, maxScore: number) => {
+        const scaled = Math.round(originalScore * scaleFactor);
+        return Math.min(scaled, maxScore);
+      };
 
-    // Store the analysis first
-    localStorage.setItem("resumeAnalysis", JSON.stringify(randomizedDemo));
+      const randomizedDemo = {
+        ...demoAnalysis,
+        overallScore: randomOverallScore,
+        roastHeadline: demoRoastHeadlines[Math.floor(Math.random() * demoRoastHeadlines.length)],
+        roastQuote: demoRoastQuotes[Math.floor(Math.random() * demoRoastQuotes.length)],
+        categories: {
+          structureCompleteness: {
+            ...demoAnalysis.categories.structureCompleteness,
+            score: scaleScore(demoAnalysis.categories.structureCompleteness.score, 20),
+          },
+          contentQuality: {
+            ...demoAnalysis.categories.contentQuality,
+            score: scaleScore(demoAnalysis.categories.contentQuality.score, 20),
+          },
+          impactMetrics: {
+            ...demoAnalysis.categories.impactMetrics,
+            score: scaleScore(demoAnalysis.categories.impactMetrics.score, 15),
+          },
+          languageWriting: {
+            ...demoAnalysis.categories.languageWriting,
+            score: scaleScore(demoAnalysis.categories.languageWriting.score, 10),
+          },
+          formattingReadability: {
+            ...demoAnalysis.categories.formattingReadability,
+            score: scaleScore(demoAnalysis.categories.formattingReadability.score, 15),
+          },
+          atsCompatibility: {
+            ...demoAnalysis.categories.atsCompatibility,
+            score: scaleScore(demoAnalysis.categories.atsCompatibility.score, 10),
+          },
+          skillsRelevance: {
+            ...demoAnalysis.categories.skillsRelevance,
+            score: scaleScore(demoAnalysis.categories.skillsRelevance.score, 10),
+          },
+        },
+      };
 
-    // Simulate loading delay to show loading messages (6 seconds)
-    await new Promise(resolve => setTimeout(resolve, 6000));
+      // Store the analysis first
+      localStorage.setItem("resumeAnalysis", JSON.stringify(randomizedDemo));
 
-    // Navigate WITHOUT clearing loading state - the navigation will unmount the component
-    // Calling setIsLoading(false) here causes a flash of the homepage before navigation
-    router.push("/results");
-    // Note: isLoading remains true - the LoadingRoast component stays visible until navigation
+      // Simulate loading delay to show loading messages (6 seconds)
+      await new Promise(resolve => setTimeout(resolve, 6000));
+
+      // Navigate WITHOUT clearing loading state - the navigation will unmount the component
+      // Calling setIsLoading(false) here causes a flash of the homepage before navigation
+      router.push("/results");
+      // Note: isLoading remains true - the LoadingRoast component stays visible until navigation
+    } finally {
+      // Clear the safety timeout if navigation succeeded
+      clearTimeout(safetyTimeout);
+    }
   };
 
   return (
