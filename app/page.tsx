@@ -559,6 +559,7 @@ export default function Home() {
 
       // Store the analysis first
       localStorage.setItem("resumeAnalysis", JSON.stringify(randomizedDemo));
+      localStorage.setItem("isDemoMode", "true");
 
       // Simulate loading delay to show loading messages (6 seconds)
       await new Promise(resolve => setTimeout(resolve, 6000));

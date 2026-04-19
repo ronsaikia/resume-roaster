@@ -66,7 +66,95 @@ export default function ResultsPage() {
   const [analysis, setAnalysis] = useState<ResumeAnalysis | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showToast, setShowToast] = useState(false);
+  const [toastSubMessage, setToastSubMessage] = useState<string | undefined>("Ab share karo sharam ke saath 😂");
   const [copied, setCopied] = useState(false);
+  const [rewriteCopied, setRewriteCopied] = useState(false);
+  
+  // AI Rewrite Lab State
+  const [customBullet, setCustomBullet] = useState("");
+  const [isRewriting, setIsRewriting] = useState(false);
+  const [rewriteResult, setRewriteResult] = useState<{ rewritten: string; tip: string } | null>(null);
+  const [rewriteError, setRewriteError] = useState<"invalid" | "quota_exceeded" | "error" | null>(null);
+  const [isDemo, setIsDemo] = useState(false);
+
+  const demoBullets = [
+    "Responsible for managing a team of developers on multiple projects",
+    "Worked on improving website performance and user experience",
+    "Assisted with data analysis and generating weekly reports",
+    "Helped in developing new features for the mobile application",
+    "Was part of a team that successfully launched a new product"
+  ];
+
+  const handleRewrite = async () => {
+    if (!customBullet.trim()) return;
+    
+    // Client-side pre-check for real mode
+    if (!isDemo && customBullet.trim().length < 10) {
+      setRewriteError("invalid");
+      setRewriteResult(null);
+      return;
+    }
+
+    setIsRewriting(true);
+    setRewriteResult(null);
+    setRewriteError(null);
+
+    try {
+      if (isDemo) {
+        // Fake delay for demo mode
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        
+        // Remove warning from mock result
+        let mockResult = {
+          rewritten: "Improved processes using [Tool] leading to [X%] increase in efficiency across [N] projects",
+          tip: "Always quantify efficiency gains.",
+        };
+        
+        const b = customBullet.toLowerCase();
+        if (b.includes("managing a team")) {
+          mockResult.rewritten = "Led cross-functional team of [N] developers, delivering [X] projects on time and reducing blockers by [Y%] through daily standups";
+          mockResult.tip = "Specify team size and delivery outcomes.";
+        } else if (b.includes("website performance")) {
+          mockResult.rewritten = "Optimized website performance reducing load time by [X%] and improving Core Web Vitals score from [Y] to [Z], increasing user retention by [N%]";
+          mockResult.tip = "Always anchor performance work to measurable before/after numbers.";
+        } else if (b.includes("data analysis")) {
+          mockResult.rewritten = "Automated [N] weekly data reports using Python, saving [X] hours/week and surfacing insights that drove [Y%] improvement in team decision speed";
+          mockResult.tip = "Time saved and decisions influenced are powerful metrics.";
+        } else if (b.includes("developing new features")) {
+          mockResult.rewritten = "Engineered [N] new features for mobile app serving [X]K users, achieving [Y]% crash-free rate and [Z]% increase in DAU";
+          mockResult.tip = "User count and stability metrics resonate with mobile hiring managers.";
+        } else if (b.includes("launched a new product")) {
+          mockResult.rewritten = "Contributed to full-cycle launch of [product] reaching [N]K users in [X] weeks, coordinating across [Y] teams and hitting [Z%] of Q1 adoption targets";
+          mockResult.tip = "Launch contributions should quantify reach, speed and team scope.";
+        }
+        
+        setRewriteResult(mockResult);
+      } else {
+        const role = localStorage.getItem("targetRole") || "";
+        const res = await fetch("/api/rewrite", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ bullet: customBullet, role }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setRewriteResult(data);
+        } else if (res.status === 422) {
+          setRewriteError("invalid");
+        } else if (res.status === 503) {
+          setRewriteError("quota_exceeded");
+        } else {
+          setRewriteError("error");
+        }
+      }
+    } catch (e) {
+      console.error(e);
+      setRewriteError("error");
+    } finally {
+      setIsRewriting(false);
+    }
+  };
+
   const [reactionSeed] = useState(() => {
     if (typeof window === 'undefined') return 0.5;
     try {
@@ -117,7 +205,19 @@ export default function ResultsPage() {
       router.push("/");
       return;
     }
+    
+    // Check Demo Mode
+    const demoFlag = localStorage.getItem("isDemoMode") === "true";
+    if (demoFlag) {
+      setIsDemo(true);
+      localStorage.removeItem("isDemoMode");
+      // Choose random demo bullet
+      const randomBullet = demoBullets[Math.floor(Math.random() * demoBullets.length)];
+      setCustomBullet(randomBullet);
+    }
+    
     setIsLoading(false);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [router]);
 
   const handleShare = async () => {
@@ -127,6 +227,7 @@ export default function ResultsPage() {
 
     try {
       await navigator.clipboard.writeText(shareText);
+      setToastSubMessage("Ab share karo sharam ke saath 😂");
       setCopied(true);
       setShowToast(true);
       setTimeout(() => setCopied(false), 3000);
@@ -419,6 +520,105 @@ export default function ResultsPage() {
               </div>
             </section>
 
+            {/* AI Rewrite Lab */}
+            <section>
+              <motion.div
+                initial={{ opacity: 0, y: 20 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                className="mb-8"
+              >
+                <h2 className="text-3xl sm:text-4xl md:text-5xl font-black font-syne text-[#1a1a1a] tracking-tight">AI Rewrite Lab</h2>
+                <p className="text-[#1a1a1a] mt-1 font-medium">Turn your weakest bullets into ATS magnets</p>
+              </motion.div>
+
+              <div className="bg-white border-4 border-[#1a1a1a] p-4 sm:p-6" style={{ boxShadow: '6px 6px 0px #1a1a1a' }}>
+                {isDemo && (
+                  <div className="mb-4 inline-flex px-3 py-1 bg-yellow-400 border-2 border-[#1a1a1a] text-black font-bold text-sm" style={{ boxShadow: '2px 2px 0px #1a1a1a' }}>
+                    Demo bullet pre-loaded — click Rewrite!
+                  </div>
+                )}
+                
+                <textarea
+                  value={customBullet}
+                  onChange={(e) => {
+                    setCustomBullet(e.target.value);
+                    setRewriteResult(null);
+                    setRewriteError(null);
+                  }}
+                  readOnly={isDemo}
+                  placeholder="Paste your weak bullet here... e.g. 'Responsible for managing the team and doing code reviews'"
+                  className={`w-full h-32 p-4 text-[#1a1a1a] font-medium border-2 border-[#1a1a1a] focus:outline-none focus:ring-0 bg-[#f0ede8] resize-none ${isDemo ? 'cursor-not-allowed opacity-90' : ''}`}
+                />
+                
+                <div className="mt-4 flex justify-end">
+                  <button
+                    onClick={handleRewrite}
+                    disabled={isRewriting || !customBullet.trim()}
+                    className="px-6 py-3 border-2 border-[#1a1a1a] bg-[#e8441a] text-white font-bold text-lg
+                             hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[4px_4px_0px_#1a1a1a]
+                             transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                  >
+                    {isRewriting ? (
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
+                        className="w-5 h-5 border-2 border-white border-t-transparent rounded-full"
+                      />
+                    ) : "✨ Rewrite"}
+                  </button>
+                </div>
+
+                <AnimatePresence>
+                  {rewriteError && (
+                    <motion.div
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      transition={{ duration: 0.2 }}
+                      className="mt-6 border-4 border-red-600 bg-red-50 p-6 text-center"
+                      style={{ boxShadow: '4px 4px 0px #dc2626' }}
+                    >
+                      <div className="text-5xl mb-2">
+                        {rewriteError === "quota_exceeded" ? "😵" : "💀"}
+                      </div>
+                      <p className="font-mono font-bold text-red-700">
+                        {rewriteError === "invalid" && "Kuch bhi likhega kya? Ek actual resume bullet daal"}
+                        {rewriteError === "quota_exceeded" && "Tokens khatam ho gaye yaar. Thodi der baad try kar"}
+                        {rewriteError === "error" && "Kuch toh gadbad hui. Dobara try kar"}
+                      </p>
+                    </motion.div>
+                  )}
+                  {rewriteResult && !rewriteError && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="mt-6 pt-6 border-t-2 border-dashed border-[#1a1a1a] overflow-hidden"
+                    >
+                      <div className="bg-green-50 p-4 border-2 border-green-600 relative group">
+                        <p className="text-[#1a1a1a] font-bold pr-10 text-lg leading-relaxed">{rewriteResult.rewritten}</p>
+                        <p className="text-sm text-green-800 mt-3 italic font-medium">💡 {rewriteResult.tip}</p>
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(rewriteResult.rewritten);
+                            setToastSubMessage(undefined);
+                            setRewriteCopied(true);
+                            setShowToast(true);
+                            setTimeout(() => setRewriteCopied(false), 3000);
+                          }}
+                          className="absolute top-2 right-2 p-2 hover:bg-green-100 rounded transition-colors"
+                          title="Copy rewritten bullet"
+                        >
+                          <Copy className="w-5 h-5 text-green-700" />
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </section>
+
             {/* Section 7: Download Report & Share */}
             <section className="text-center">
               <motion.div
@@ -479,7 +679,7 @@ export default function ResultsPage() {
         {/* Toast Notification */}
         <Toast
           message="Copied to clipboard!"
-          subMessage="Ab share karo sharam ke saath 😂"
+          subMessage={toastSubMessage}
           isVisible={showToast}
           onClose={() => setShowToast(false)}
         />
