@@ -1,6 +1,8 @@
 <div align="center">
   
-
+<div align="center">
+  <img src="public/" alt="App Screenshot" width="600" />
+</div>
   
 
   **Because your resume is currently worth ₹15** <br>
