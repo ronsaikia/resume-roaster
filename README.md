@@ -1,19 +1,24 @@
+<br/>
 <div align="center">
-  
+<a href="https://vercel.com" target="_blank">
 <div align="center">
-  <img src="public/" alt="App Screenshot" width="600" />
+  <img src="public/Screenshot 2026-04-19 at 10.55.20 AM.png" alt="App Screenshot" width="900" />
 </div>
-  
+</a>
+<br/>
+<br/>
 
-  **Because your resume is currently worth ₹15** <br>
+  **Because your resume is currently worth ₹15** 
+  <br/>
+  <br>
   *An AI-powered, brutally honest resume roaster and ATS analyzer.*
 
   
 
-  [![Next.js](https://img.shields.io/badge/Next.js-14-black?style=flat&logo=next.js)](https://nextjs.org/)
-  [![TypeScript](https://img.shields.io/badge/TypeScript-007ACC?style=flat&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-  [![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-38B2AC?style=flat&logo=tailwind-css&logoColor=white)](https://tailwindcss.com/)
-  [![Google Gemini](https://img.shields.io/badge/Google_Gemini-8E75B2?style=flat&logo=google&logoColor=white)](https://deepmind.google/technologies/gemini/)
+  <a href="https://nextjs.org/"><img src="https://img.shields.io/badge/Next.js-000000?style=for-the-badge&logo=nextdotjs&logoColor=white" alt="Next.js" /></a>
+  <a href="https://www.typescriptlang.org/"><img src="https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white" alt="TypeScript" /></a>
+  <a href="https://tailwindcss.com/"><img src="https://img.shields.io/badge/Tailwind_CSS-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white" alt="Tailwind CSS" /></a>
+  <a href="https://deepmind.google/technologies/gemini/"><img src="https://img.shields.io/badge/Google_Gemini-1A73E8?style=for-the-badge&logo=googlegemini&logoColor=white" alt="Google Gemini" /></a>
 </div>
 
 <br/>
