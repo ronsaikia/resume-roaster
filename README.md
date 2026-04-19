@@ -1,6 +1,6 @@
 <br/>
 <div align="center">
-<a href="https://vercel.com" target="_blank">
+<a href="https://jhalmuricv.vercel.app/" target="_blank">
 <div align="center">
   <img src="public/Screenshot 2026-04-19 at 10.55.20 AM.png" alt="App Screenshot" width="900" />
 </div>
