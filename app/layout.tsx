@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inter, Space_Mono, Syne } from "next/font/google";
 import "./globals.css";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -65,6 +66,7 @@ export default function RootLayout({
         style={{ overflowX: "hidden", height: "auto" }}
       >
         {children}
+        <SpeedInsights />
       </body>
     </html>
   );
